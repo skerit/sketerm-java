@@ -1,0 +1,69 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+group = 'be.elevenways'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+configurations {
+    loaderStub
+    runtimeClasspath.extendsFrom(loaderStub)
+    testRuntimeClasspath.extendsFrom(loaderStub)
+}
+
+configurations.all {
+    resolutionStrategy {
+        cacheChangingModulesFor 0, 'seconds'
+    }
+}
+
+dependencies {
+    // Protoblast is the ONLY runtime dependency: Dry supplies the JSON codec and
+    // JobRunner the reader/pump threads. No Jackson, no Reactor, no SLF4J.
+    api('be.elevenways:protoblast-server:0.1.0-SNAPSHOT') {
+        changing = true
+    }
+
+    // BlastAutoLoadInit for THIS project's own runtime. Declared on a private
+    // configuration that only the LOCAL runtime classpaths extend, never in the
+    // published POM: a consumer with a real generated loader would otherwise get
+    // a duplicate FQN on its runtime classpath.
+    loaderStub('be.elevenways:protoblast-loader-stub:0.1.0-SNAPSHOT') {
+        changing = true
+    }
+
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    // Gradle 9 no longer auto-provides the JUnit Platform launcher.
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+    }
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+        }
+    }
+    repositories {
+        mavenLocal()
+    }
+}
