@@ -211,6 +211,62 @@ class PageApiTest {
         assertThrows(NotFoundException.class, () -> browser.page(99), "an unknown handle is refused");
     }
 
+    @Test
+    @DisplayName("refresh() absorbs a web_tabs answer's policy facts through the same seam as any other")
+    void refreshAbsorbsPolicyFacts() {
+
+        FakeSketermServer server = new FakeSketermServer();
+
+        server.on("web_open", facts(map("view", 1, "document", 1, "revision", 1, "snapshot", TREE)));
+        server.on("web_tabs", map("backend", "headless", "count", 1, "helper", "ready",
+                "views", List.of(map("view", 1, "url", "https://example.test/", "title", "Example",
+                        "loading", false, "current", true,
+                        "policy_active", true, "policy_exhausted", true,
+                        "policy_exhausted_reason", "request_cap"))));
+
+        Page page = server.browser().openPage("https://example.test/");
+        assertFalse(page.isPolicyActive(), "before refresh: web_open carried no policy facts");
+
+        PageInfo info = page.refresh();
+
+        assertTrue(info.policyActive(), "the returned PageInfo decoded policy_active");
+        assertTrue(info.policyExhausted(), "and policy_exhausted");
+        assertEquals(DenialReason.REQUEST_CAP, info.policyExhaustedReason(), "and the reason");
+
+        assertTrue(page.isPolicyActive(), "refresh() fed policy_active into the page's cache");
+        assertTrue(page.isPolicyExhausted(), "and the latched exhaustion");
+        assertEquals(DenialReason.REQUEST_CAP, page.policyExhaustedReason(), "and its reason");
+    }
+
+    @Test
+    @DisplayName("refresh() never clears a cached exhaustion when the answer omits the keys")
+    void refreshNeverClearsLatchedExhaustion() {
+
+        FakeSketermServer server = new FakeSketermServer();
+
+        server.on("web_open", facts(map("view", 1, "document", 1, "revision", 1, "snapshot", TREE)));
+        server.on("web_read", facts(map("policy_exhausted", true, "policy_exhausted_reason", "byte_cap",
+                "reader_ids", true, "document", 1, "revision", 1, "markdown", "# Hello\n")));
+        server.on("web_tabs", map("backend", "headless", "count", 1, "helper", "ready",
+                "views", List.of(map("view", 1, "url", "https://example.test/", "title", "Example",
+                        "loading", false, "current", true, "policy_active", true))));
+
+        Page page = server.browser().openPage("https://example.test/");
+        page.read();
+
+        assertTrue(page.isPolicyExhausted(), "the read latched the budget in the page's cache");
+        assertEquals(DenialReason.BYTE_CAP, page.policyExhaustedReason());
+
+        PageInfo info = page.refresh();
+
+        assertFalse(info.policyExhausted(), "this web_tabs entry carried no exhaustion fact");
+        assertNull(info.policyExhaustedReason());
+
+        assertTrue(page.isPolicyExhausted(), "refresh() must not clear a latched exhaustion");
+        assertEquals(DenialReason.BYTE_CAP, page.policyExhaustedReason(),
+                "the reason from the earlier answer is kept, since latching is permanent per view");
+    }
+
     private static int argInt(FakeSketermServer server, String tool, String key) {
         return ((Number) server.lastArguments(tool).get(key)).intValue();
     }

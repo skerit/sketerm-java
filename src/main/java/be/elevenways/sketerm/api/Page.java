@@ -254,16 +254,7 @@ public final class Page {
 
         for (PageInfo info : Browser.listPages(this.calls)) {
             if (info.handle() == this.handle) {
-                this.url = info.url();
-                this.title = info.title();
-                this.loading = info.loading();
-
-                if (info.profileKind() != null) {
-                    this.profile = info.profile();
-                    this.profileKind = info.profileKind();
-                    this.context = info.context();
-                }
-
+                this.absorb(info.toFacts());
                 return info;
             }
         }

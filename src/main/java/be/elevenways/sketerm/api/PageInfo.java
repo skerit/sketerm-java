@@ -2,6 +2,7 @@ package be.elevenways.sketerm.api;
 
 import be.elevenways.sketerm.json.Json;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -12,6 +13,9 @@ import java.util.Map;
  * @param profileKind which identity the view holds, null with a GUI (the tool reports none there)
  * @param context the engine identity-context id, 0 for the shared default jar
  * @param current whether a web_* call that omits 'pane' would address this view
+ * @param policyActive whether an enforced network policy is installed on this view
+ * @param policyExhausted whether a policy budget has LATCHED for this view; permanent per view
+ * @param policyExhaustedReason which budget it was, null while none has latched
  */
 public record PageInfo(int handle,
                        String url,
@@ -24,12 +28,16 @@ public record PageInfo(int handle,
                        String profile,
                        ProfileKind profileKind,
                        int context,
-                       boolean current) {
+                       boolean current,
+                       boolean policyActive,
+                       boolean policyExhausted,
+                       DenialReason policyExhaustedReason) {
 
     static PageInfo decode(Map<String, Object> entry) {
 
         String profile = Json.optStr(entry, "profile");
         Long context = Json.optLong(entry, "context");
+        boolean exhausted = Json.optBool(entry, "policy_exhausted", false);
 
         return new PageInfo(Handles.of(entry, "a web_tabs entry"),
                 Json.optStr(entry, "url"),
@@ -42,7 +50,42 @@ public record PageInfo(int handle,
                 profile == null || profile.isEmpty() ? null : profile,
                 kindOf(entry),
                 context == null ? 0 : context.intValue(),
-                Json.optBool(entry, "current", false));
+                Json.optBool(entry, "current", false),
+                Json.optBool(entry, "policy_active", false),
+                exhausted,
+                exhausted ? DenialReason.requireExhaustion(Json.optStr(entry, "policy_exhausted_reason")) : null);
+    }
+
+    /**
+     * Re-wire this entry as the facts shape {@link Page#absorb} expects, so a refresh or an attach
+     * updates a page's cache through the exact same seam every other answer does.
+     *
+     * <p>{@code policy_exhausted} is included only when true, mirroring the wire contract itself
+     * (the fact is emitted only on latch) so {@link Page#absorbPolicy} never mistakes an absent key
+     * for the budgets having come back.</p>
+     */
+    Map<String, Object> toFacts() {
+
+        Map<String, Object> facts = new LinkedHashMap<>();
+        ToolCalls.put(facts, "url", this.url);
+        ToolCalls.put(facts, "title", this.title);
+        facts.put("loading", this.loading);
+
+        if (this.profileKind != null) {
+            facts.put("profile", this.profile == null ? "" : this.profile);
+            facts.put("profile_kind", this.profileKind.wire());
+            facts.put("context", this.context);
+        }
+
+        facts.put("policy_active", this.policyActive);
+
+        if (this.policyExhausted) {
+            facts.put("policy_exhausted", true);
+            ToolCalls.put(facts, "policy_exhausted_reason",
+                    this.policyExhaustedReason == null ? null : this.policyExhaustedReason.wire());
+        }
+
+        return facts;
     }
 
     /**

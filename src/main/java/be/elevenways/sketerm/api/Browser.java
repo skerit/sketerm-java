@@ -89,7 +89,7 @@ public final class Browser {
 
         for (PageInfo info : this.pages()) {
             if (info.handle() == handle) {
-                return new Page(this.calls, handle, factsOf(info), null);
+                return new Page(this.calls, handle, info.toFacts(), null);
             }
         }
 
@@ -103,7 +103,7 @@ public final class Browser {
 
         for (PageInfo info : this.pages()) {
             if (info.current()) {
-                return new Page(this.calls, info.handle(), factsOf(info), null);
+                return new Page(this.calls, info.handle(), info.toFacts(), null);
             }
         }
 
@@ -199,21 +199,5 @@ public final class Browser {
         }
 
         return List.copyOf(pages);
-    }
-
-    private static Map<String, Object> factsOf(PageInfo info) {
-
-        Map<String, Object> facts = ToolCalls.args();
-        ToolCalls.put(facts, "url", info.url());
-        ToolCalls.put(facts, "title", info.title());
-        facts.put("loading", info.loading());
-
-        if (info.profileKind() != null) {
-            facts.put("profile", info.profile() == null ? "" : info.profile());
-            facts.put("profile_kind", info.profileKind().wire());
-            facts.put("context", info.context());
-        }
-
-        return facts;
     }
 }
