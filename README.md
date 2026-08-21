@@ -106,7 +106,51 @@ Failures are typed off `structuredContent.error.code` by one switch in `SketermA
 - `ProtocolMismatchException` - the answer had no `structuredContent`, or no view handle in it. That
   is a Sketerm predating the result-shape migration, and it is named as such rather than guessed at.
 
-`Page` has no `close()` yet: the tool table this client was written against publishes no `web_close`.
+### Lifecycle and browsing profiles
+
+`page.close()` calls `web_close` and decodes a `CloseResult` (`closed`, `remaining`, `current`,
+`profile`, `profileReleased`). What it destroys depends on the backend and the result says which:
+headless it ends a helper view, but with a GUI attached it closes the USER'S pane, exactly as
+`close_pane` does (`closedAPane()`). Every later call on that `Page` is refused locally with a
+`PageClosedException`, because the handle is free to be handed to the next view somebody opens.
+
+Headless views can hold an isolated browsing identity:
+
+```java
+Browser browser = sketerm.browser();
+
+if (browser.supportsProfiles()) {
+
+    // Its own cookie jar and cache; logins survive the close and a server restart
+    Page work = browser.openPage("https://example.com/", OpenOptions.inProfile("work"));
+    work.close();
+
+    // A throwaway identity instead, destroyed with the view
+    Page once = browser.openPage("https://example.com/", OpenOptions.ephemeralIdentity());
+    once.close();
+
+    for (BrowserProfile profile : browser.profiles().profiles()) {
+        System.out.println(profile.name() + " " + profile.views() + " views");
+    }
+
+    browser.resetProfile("work");
+}
+```
+
+The rules the wire contract insists on, mirrored here:
+
+- profiles are HEADLESS ONLY; with a GUI attached the identity containers belong to the user and
+  both the open and the profile tools refuse;
+- the refusal is FAIL CLOSED - nothing is opened and no page is loaded, never a silent fall back to
+  the shared jar - so `UnavailableException` from `openPage` means there is no view;
+- `profile` and `ephemeral` are opposite answers to the same question and `OpenOptions` refuses both
+  at build time, as the server does at call time;
+- a name is `[a-z0-9_-]{1,64}` minus `default` and `none`, checked client-side by `ProfileNames` so a
+  doomed call never goes out;
+- SESSION cookies never persist: they die with the browser process, profile or not;
+- a `context` id is opaque and is retired by a reset, so a profile is addressed by NAME everywhere;
+- `supportsProfiles()` reads the `capabilities` report's `web_profiles` flag, the preflight before
+  offering the feature at all.
 
 ## Building
 
@@ -118,4 +162,7 @@ Protoblast must be published to mavenLocal first (`zenit-dev build` in the javaw
 `SketermSessionIT` drives the real binary and skips itself when `sketerm` is not on PATH.
 `PageApiIT` drives the whole api layer against a real headless view: it copies `sketerm` and
 `sketerm-webengine` out of the sibling checkout once, so a rebuild mid-run cannot swap the binary
-underneath it, and skips itself when either is missing.
+underneath it, and skips itself when either is missing. Its second journey proves close and the
+profile lifecycle over a loopback HTTP fixture (a `data:` document carries no cookies at all in
+Chromium), under its own `XDG_STATE_HOME` and instance name so the profile store is per run; it
+skips those steps when the copied binary predates the profile tools.

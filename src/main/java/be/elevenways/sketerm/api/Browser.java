@@ -41,6 +41,14 @@ public final class Browser {
             ToolCalls.put(arguments, "width", options.width());
             ToolCalls.put(arguments, "height", options.height());
             ToolCalls.putTimeout(arguments, options.timeout());
+
+            if (options.profile() != null) {
+                arguments.put("profile", ProfileNames.require(options.profile(), "web_open"));
+            }
+
+            if (options.ephemeral()) {
+                arguments.put("ephemeral", true);
+            }
         }
 
         Map<String, Object> structured = this.calls.structured("web_open", arguments);
@@ -93,6 +101,49 @@ public final class Browser {
         return null;
     }
 
+    /**
+     * The named persistent browsing identities this server can open views in.
+     *
+     * <p>A profile is created by opening a view in it, so this lists what has been used, not what
+     * could be. Headless only: with a GUI attached the browser's identity containers are the
+     * user's own and the tool refuses.</p>
+     *
+     * @throws UnavailableException with a GUI attached, or when the profile store cannot be opened
+     */
+    public ProfileList profiles() {
+        return ProfileList.decode(this.calls.structured("web_profiles", ToolCalls.args()));
+    }
+
+    /**
+     * Erase a profile's cookies, logins and cache. Irreversible.
+     *
+     * <p>The name stays usable: the next open with it starts from an empty, freshly allocated jar
+     * behind a new context id.</p>
+     *
+     * @throws ConflictException while any open view still holds the profile; close them first
+     * @throws NotFoundException when no profile has that name
+     * @throws InvalidArgsException when the name breaks {@link ProfileNames}
+     */
+    public ProfileResetResult resetProfile(String name) {
+
+        Map<String, Object> arguments = ToolCalls.args();
+        arguments.put("profile", ProfileNames.require(name, "web_profile_reset"));
+
+        return ProfileResetResult.decode(this.calls.structured("web_profile_reset", arguments));
+    }
+
+    /**
+     * Preflight: whether this server advertises named browsing profiles at all.
+     *
+     * <p>Worth asking before offering the feature, since a refusal is fail-closed and opens
+     * nothing rather than falling back to the shared jar.</p>
+     *
+     * @return the capabilities report's web_profiles flag, false when the server names none
+     */
+    public boolean supportsProfiles() {
+        return Json.optBool(this.calls.structured("capabilities", ToolCalls.args()), "web_profiles", false);
+    }
+
     static List<PageInfo> listPages(ToolCalls calls) {
 
         Map<String, Object> structured = calls.structured("web_tabs", ToolCalls.args());
@@ -114,6 +165,12 @@ public final class Browser {
         ToolCalls.put(facts, "url", info.url());
         ToolCalls.put(facts, "title", info.title());
         facts.put("loading", info.loading());
+
+        if (info.profileKind() != null) {
+            facts.put("profile", info.profile() == null ? "" : info.profile());
+            facts.put("profile_kind", info.profileKind().wire());
+            facts.put("context", info.context());
+        }
 
         return facts;
     }

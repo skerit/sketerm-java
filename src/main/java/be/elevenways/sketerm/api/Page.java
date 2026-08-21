@@ -14,8 +14,8 @@ import java.util.Optional;
  * One web view, addressed by its handle: every call sends 'pane' explicitly rather than leaning on
  * the server's notion of the current view, so several pages can be driven from one session.
  *
- * <p>There is no close() yet: the server publishes no web_close in the tool table this client was
- * written against. A view lives until the session that opened it goes away.</p>
+ * <p>{@link #close()} ends the view; every later call on this object is refused locally, because
+ * the handle is free to be handed to a view somebody else opens.</p>
  */
 public final class Page {
 
@@ -28,6 +28,11 @@ public final class Page {
     private boolean loading;
     private int document;
     private int revision;
+    private String profile;
+    private ProfileKind profileKind;
+    private int context;
+    private boolean closed;
+    private CloseResult closeResult;
     private Snapshot lastSnapshot;
 
     Page(ToolCalls calls, int handle, Map<String, Object> structured, Snapshot opening) {
@@ -97,17 +102,82 @@ public final class Page {
     }
 
     /**
+     * @return the named profile this view was opened in, null for the default jar, an ephemeral
+     *         identity, or a GUI backend (which reports no identity at all)
+     */
+    public String profile() {
+        return this.profile;
+    }
+
+    /**
+     * @return which identity this view holds, null when the answer named none (a GUI backend)
+     */
+    public ProfileKind profileKind() {
+        return this.profileKind;
+    }
+
+    /**
+     * @return the engine identity-context id, 0 for the shared default jar; opaque, and retired by
+     *         a profile reset, so never store it as the name of anything
+     */
+    public int context() {
+        return this.context;
+    }
+
+    /**
+     * @return whether {@link #close()} already ended this view
+     */
+    public boolean isClosed() {
+        return this.closed;
+    }
+
+    /**
+     * Close this view.
+     *
+     * <p>Headless it destroys the helper view, and with it an ephemeral identity whose last view
+     * this was; a named profile KEEPS its storage ({@link Browser#resetProfile} erases it). With a
+     * GUI attached this closes the user's PANE and is destructive - the answer's backend says
+     * which of the two happened.</p>
+     *
+     * <p>Closing twice is a no-op that answers with the first close's result.</p>
+     */
+    public CloseResult close() {
+
+        if (this.closed) {
+            return this.closeResult;
+        }
+
+        Map<String, Object> structured = this.calls.structured("web_close", this.args());
+
+        this.closed = true;
+        this.closeResult = CloseResult.decode(structured);
+
+        return this.closeResult;
+    }
+
+    /**
      * Re-read this view's facts from web_tabs.
      *
      * @throws NotFoundException when the view is gone
      */
     public PageInfo refresh() {
 
+        if (this.closed) {
+            throw new PageClosedException(this.handle, "refresh()");
+        }
+
         for (PageInfo info : Browser.listPages(this.calls)) {
             if (info.handle() == this.handle) {
                 this.url = info.url();
                 this.title = info.title();
                 this.loading = info.loading();
+
+                if (info.profileKind() != null) {
+                    this.profile = info.profile();
+                    this.profileKind = info.profileKind();
+                    this.context = info.context();
+                }
+
                 return info;
             }
         }
@@ -556,6 +626,20 @@ public final class Page {
             this.loading = Json.optBool(structured, "loading", false);
         }
 
+        // Only web_open and web_tabs carry the identity, and only headless; every other answer
+        // leaves what this page already knows alone.
+        ProfileKind kind = PageInfo.kindOf(structured);
+
+        if (kind != null) {
+
+            String profile = Json.optStr(structured, "profile");
+            Long context = Json.optLong(structured, "context");
+
+            this.profileKind = kind;
+            this.profile = profile == null || profile.isEmpty() ? null : profile;
+            this.context = context == null ? 0 : context.intValue();
+        }
+
         Long document = Json.optLong(structured, "document");
         Long revision = Json.optLong(structured, "revision");
 
@@ -568,7 +652,16 @@ public final class Page {
         }
     }
 
+    /**
+     * AIDEV-NOTE: every per-view call goes through here, so this is THE place the closed check
+     * lives. The handle is not reserved after a close - the helper is free to hand it to the next
+     * view - so sending the call anyway could quietly drive a page nobody asked for.
+     */
     private Map<String, Object> args() {
+
+        if (this.closed) {
+            throw new PageClosedException(this.handle, "a web_* call");
+        }
 
         Map<String, Object> arguments = ToolCalls.args();
         arguments.put("pane", this.handle);
