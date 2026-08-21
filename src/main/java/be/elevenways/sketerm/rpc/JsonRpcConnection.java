@@ -3,7 +3,6 @@ package be.elevenways.sketerm.rpc;
 import be.elevenways.protoblast.common.thread.JobRunner;
 import be.elevenways.sketerm.json.Json;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,8 +29,10 @@ public final class JsonRpcConnection implements AutoCloseable {
     private final JobRunner jobRunner = JobRunner.create("sketerm-rpc");
     private final AtomicLong nextId = new AtomicLong(1);
     private final Map<Long, CompletableFuture<Map<String, Object>>> pending = new ConcurrentHashMap<>();
+    private final Object lifecycleLock = new Object();
 
     private volatile boolean closed;
+    private volatile TransportException terminalFailure;
     private volatile long timeoutMs = DEFAULT_TIMEOUT_MS;
 
     public JsonRpcConnection(SketermTransport transport) {
@@ -68,10 +69,6 @@ public final class JsonRpcConnection implements AutoCloseable {
      */
     public Map<String, Object> call(String method, Map<String, Object> params, long timeoutMs) {
 
-        if (this.closed) {
-            throw new TransportException("Connection is closed; cannot call " + method);
-        }
-
         long id = this.nextId.getAndIncrement();
 
         Map<String, Object> request = new LinkedHashMap<>();
@@ -84,21 +81,25 @@ public final class JsonRpcConnection implements AutoCloseable {
         }
 
         CompletableFuture<Map<String, Object>> future = new CompletableFuture<>();
-        this.pending.put(id, future);
 
-        try {
-            this.transport.send(Json.write(request));
-        } catch (RuntimeException e) {
-            this.pending.remove(id);
-            throw e;
+        synchronized (this.lifecycleLock) {
+            this.requireOpen(method);
+            this.pending.put(id, future);
+
+            try {
+                this.transport.send(Json.write(request));
+            } catch (RuntimeException e) {
+                this.pending.remove(id);
+                throw e;
+            }
         }
 
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             this.pending.remove(id);
-            throw new TransportException("Timed out after " + timeoutMs + "ms waiting for '"
-                    + method + "'; " + this.transport.describeFailureContext(), e);
+            throw new CallTimeoutException(method, timeoutMs,
+                    this.transport.describeFailureContext(), e);
         } catch (InterruptedException e) {
             this.pending.remove(id);
             Thread.currentThread().interrupt();
@@ -128,7 +129,10 @@ public final class JsonRpcConnection implements AutoCloseable {
             message.put("params", params);
         }
 
-        this.transport.send(Json.write(message));
+        synchronized (this.lifecycleLock) {
+            this.requireOpen(method);
+            this.transport.send(Json.write(message));
+        }
     }
 
     /**
@@ -137,13 +141,19 @@ public final class JsonRpcConnection implements AutoCloseable {
     @Override
     public void close() {
 
-        if (this.closed) {
-            return;
+        List<CompletableFuture<Map<String, Object>>> waiting;
+
+        synchronized (this.lifecycleLock) {
+            if (this.closed) {
+                return;
+            }
+
+            this.closed = true;
+            waiting = this.drainPending();
         }
 
-        this.closed = true;
+        completeAll(waiting, new TransportException("Connection closed"));
         this.transport.close();
-        this.failAllPending("Connection closed");
         this.jobRunner.shutdownNow();
     }
 
@@ -164,28 +174,18 @@ public final class JsonRpcConnection implements AutoCloseable {
                 this.dispatch(line);
             }
         } catch (RuntimeException e) {
-            if (!this.closed) {
-                this.failAllPending("Reader failed: " + e.getMessage());
-            }
-
+            this.failConnection("Reader failed: " + e.getMessage(), e);
             return;
         }
 
-        if (!this.closed) {
-            this.failAllPending("The server closed its output stream");
-        }
+        this.failConnection("The server closed its output stream", null);
     }
 
     private void dispatch(String line) {
 
         Map<String, Object> message;
 
-        try {
-            message = Json.parseObject(line);
-        } catch (RuntimeException e) {
-            // A frame we cannot parse cannot be correlated; nothing to fail but the log.
-            return;
-        }
+        message = Json.parseObject(line);
 
         Long id = Json.optLong(message, "id");
 
@@ -219,17 +219,50 @@ public final class JsonRpcConnection implements AutoCloseable {
         future.complete(Json.asMap(result, "the 'result' member"));
     }
 
-    private void failAllPending(String reason) {
+    private void requireOpen(String method) {
 
-        String context = reason + "; " + this.transport.describeFailureContext();
-        List<Long> ids = new ArrayList<>(this.pending.keySet());
+        if (this.closed) {
+            throw new TransportException("Connection is closed; cannot send '" + method + "'");
+        }
 
-        for (Long id : ids) {
-            CompletableFuture<Map<String, Object>> future = this.pending.remove(id);
+        if (this.terminalFailure != null) {
+            throw new TransportException("Connection has failed; cannot send '" + method + "': "
+                    + this.terminalFailure.getMessage(), this.terminalFailure);
+        }
+    }
 
-            if (future != null) {
-                future.completeExceptionally(new TransportException(context));
+    private void failConnection(String reason, Throwable cause) {
+
+        TransportException failure;
+        List<CompletableFuture<Map<String, Object>>> waiting;
+
+        synchronized (this.lifecycleLock) {
+            if (this.closed || this.terminalFailure != null) {
+                return;
             }
+
+            String context = reason + "; " + this.transport.describeFailureContext();
+            failure = cause == null
+                    ? new TransportException(context)
+                    : new TransportException(context, cause);
+            this.terminalFailure = failure;
+            waiting = this.drainPending();
+        }
+
+        completeAll(waiting, failure);
+    }
+
+    private List<CompletableFuture<Map<String, Object>>> drainPending() {
+        List<CompletableFuture<Map<String, Object>>> waiting = List.copyOf(this.pending.values());
+        this.pending.clear();
+        return waiting;
+    }
+
+    private static void completeAll(List<CompletableFuture<Map<String, Object>>> waiting,
+                                    TransportException failure) {
+
+        for (CompletableFuture<Map<String, Object>> future : waiting) {
+            future.completeExceptionally(failure);
         }
     }
 }

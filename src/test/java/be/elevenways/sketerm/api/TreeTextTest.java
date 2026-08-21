@@ -97,8 +97,8 @@ class TreeTextTest {
     }
 
     @Test
-    @DisplayName("A snapshot payload without a tree is refused by name")
-    void snapshotWithoutATree() {
+    @DisplayName("A direct snapshot payload without a tree is refused by name")
+    void directSnapshotWithoutATree() {
 
         ProtocolMismatchException failure = assertThrows(ProtocolMismatchException.class,
                 () -> Snapshot.decode(1, Map.of("snapshot_error", "the helper timed out"), "web_open"));

@@ -3,6 +3,7 @@ package be.elevenways.sketerm.api;
 import be.elevenways.sketerm.json.Json;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -23,6 +24,9 @@ public final class Browser {
     /**
      * Open a new view on a url and wait for that first navigation to settle.
      *
+     * <p>A successful but slow open can return a live page without its first semantic tree;
+     * {@link Page#lastSnapshot()} is then null and {@link Page#openingSnapshotError()} says why.</p>
+     *
      * @throws ProtocolMismatchException when the answer carries no view handle
      */
     public Page openPage(String url) {
@@ -36,6 +40,7 @@ public final class Browser {
      *         capability - NOTHING is opened, there is deliberately no unpoliced fallback
      * @throws ConflictException when the helper cannot hold another policy (its table is full);
      *         the view is closed again un-navigated
+     * @throws UnavailableException when the server returned a handle that is no longer an open view
      */
     public Page openPage(String url, OpenOptions options) {
 
@@ -63,7 +68,40 @@ public final class Browser {
         Map<String, Object> structured = this.calls.structured("web_open", arguments);
         int handle = Handles.of(structured, "web_open");
 
-        return new Page(this.calls, handle, structured, Snapshot.decode(handle, structured, "web_open"));
+        try {
+            Snapshot opening = structured.containsKey("snapshot")
+                    ? Snapshot.decode(handle, structured, "web_open") : null;
+            Map<String, Object> pageFacts = structured;
+
+            if (opening == null) {
+                PageInfo live = listPages(this.calls).stream()
+                        .filter(info -> info.handle() == handle)
+                        .findFirst()
+                        .orElseThrow(() -> new UnavailableException("web_open returned handle "
+                                + handle + " but web_tabs says that view is not open; the browser"
+                                + " helper did not finish creating it", "web_open", true, null));
+
+                // web_tabs was read after web_open, so its changing page facts are fresher. Keep
+                // web_open's backend, document and policy detail for keys PageInfo does not carry.
+                pageFacts = new LinkedHashMap<>(structured);
+                pageFacts.putAll(live.toFacts());
+            }
+
+            return new Page(this.calls, handle, pageFacts, opening);
+        } catch (RuntimeException failure) {
+            // A successful web_open already minted this handle. Never turn a decode disagreement
+            // into a view the caller cannot address or close.
+            Map<String, Object> close = ToolCalls.args();
+            close.put("pane", handle);
+
+            try {
+                this.calls.structured("web_close", close);
+            } catch (RuntimeException closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+
+            throw failure;
+        }
     }
 
     /**

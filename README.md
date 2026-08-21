@@ -90,6 +90,17 @@ try (Sketerm sketerm = Sketerm.launch(options)) {
 Every call names its view handle explicitly (the `pane` argument), so several pages can be driven
 from one session without the server's "current view" ever deciding for you.
 
+The first semantic snapshot is opportunistic, not the view's identity. A slow `web_open` may return
+a still-live `Page` whose `lastSnapshot()` is null; `wasOpeningSettled()` and
+`openingSnapshotError()` preserve that outcome, and a later `snapshot(FULL)` can recover. If the
+returned handle is not actually present in `web_tabs`, the SDK closes it best-effort and throws
+`UnavailableException` instead of exposing a phantom page.
+
+Operation timeouts and JSON-RPC deadlines are separate on the wire. The SDK keeps the RPC request
+alive beyond the operation's `timeout_ms` so Sketerm's bounded timeout result can arrive. If the RPC
+deadline itself expires, `CallTimeoutException.outcomeUnknown()` is true: the request was sent, so a
+mutating call must not be retried blindly.
+
 ### Vocabularies and refusals
 
 The tool schemas own the vocabularies; the enums mirror them one for one and carry their wire token

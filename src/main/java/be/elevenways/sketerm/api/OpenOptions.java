@@ -51,6 +51,10 @@ public record OpenOptions(Integer width,
      * refuses the open and NOTHING is opened, never a view running unpoliced.</p>
      */
     public static OpenOptions withNetworkPolicy(NetworkPolicy policy) {
+        if (policy == null) {
+            throw new IllegalArgumentException("A fail-closed network policy must not be null");
+        }
+
         return defaults().withPolicy(policy);
     }
 

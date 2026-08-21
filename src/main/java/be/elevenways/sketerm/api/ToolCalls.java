@@ -14,6 +14,9 @@ import java.util.Map;
  */
 final class ToolCalls {
 
+    /** Time for a bounded server timeout result to cross MCP after the operation's own deadline. */
+    private static final long RESPONSE_GRACE_MS = 5_000;
+
     private final McpSession session;
     private final Duration defaultTimeout;
 
@@ -46,10 +49,32 @@ final class ToolCalls {
     ToolResult call(String tool, Map<String, Object> arguments) {
 
         try {
-            return this.session.callToolOrThrow(tool, arguments);
+            return this.session.callToolOrThrow(tool, arguments, this.rpcTimeoutMs(arguments));
         } catch (ToolException e) {
             throw SketermApiException.from(e);
         }
+    }
+
+    /**
+     * The wire operation owns {@code timeout_ms}; the enclosing RPC must outlive it long enough to
+     * receive Sketerm's timeout result instead of abandoning a request whose outcome is unknown.
+     */
+    long rpcTimeoutMs(Map<String, Object> arguments) {
+
+        long operationMs = this.defaultTimeout == null
+                ? this.session.getConnection().getTimeoutMs()
+                : this.defaultTimeout.toMillis();
+        Object requested = arguments == null ? null : arguments.get("timeout_ms");
+
+        if (requested instanceof Number number) {
+            operationMs = Math.max(operationMs, number.longValue());
+        }
+
+        if (operationMs > Long.MAX_VALUE - RESPONSE_GRACE_MS) {
+            return Long.MAX_VALUE;
+        }
+
+        return operationMs + RESPONSE_GRACE_MS;
     }
 
     /**
@@ -90,7 +115,18 @@ final class ToolCalls {
     static void putTimeout(Map<String, Object> arguments, Duration timeout) {
 
         if (timeout != null) {
-            arguments.put("timeout_ms", timeout.toMillis());
+            if (timeout.isNegative() || timeout.isZero()) {
+                throw new IllegalArgumentException("A tool timeout must be positive: " + timeout);
+            }
+
+            long timeoutMs = timeout.toMillis();
+
+            if (timeoutMs == 0) {
+                throw new IllegalArgumentException("A tool timeout must be at least one millisecond: "
+                        + timeout);
+            }
+
+            arguments.put("timeout_ms", timeoutMs);
         }
     }
 }

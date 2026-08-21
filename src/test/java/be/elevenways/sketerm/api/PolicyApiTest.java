@@ -176,6 +176,10 @@ class PolicyApiTest {
     @DisplayName("A policied open sends the policy object and the page adopts its provenance")
     void policiedOpen() {
 
+        assertThrows(IllegalArgumentException.class,
+                () -> OpenOptions.withNetworkPolicy(null),
+                "the fail-closed convenience must not turn a missing policy into an unpoliced open");
+
         FakeSketermServer server = new FakeSketermServer();
 
         server.on("web_open", arguments -> facts(map("view", 3, "document", 1, "revision", 1,

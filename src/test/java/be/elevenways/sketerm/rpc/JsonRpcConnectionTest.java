@@ -87,13 +87,15 @@ class JsonRpcConnectionTest {
 
         try (JsonRpcConnection connection = new JsonRpcConnection(transport)) {
 
-            TransportException failure = assertThrows(TransportException.class,
+            CallTimeoutException failure = assertThrows(CallTimeoutException.class,
                     () -> connection.call("ping", null, 150), "the call gives up");
 
             assertTrue(failure.getMessage().contains("Timed out"), "the failure is a timeout");
             assertTrue(failure.getMessage().contains("ping"), "it names the method");
             assertTrue(failure.getMessage().contains("the fake server said nothing"),
                     "it carries the transport's diagnostics");
+            assertTrue(failure.outcomeUnknown(), "the sent request must not be retried blindly");
+            assertEquals("ping", failure.method(), "the typed failure names the method");
         }
     }
 
@@ -127,6 +129,60 @@ class JsonRpcConnectionTest {
                     "carrying the exit code");
             assertTrue(failure.get().getMessage().contains("fatal: no display"),
                     "carrying the stderr tail");
+
+            TransportException terminal = assertThrows(TransportException.class,
+                    () -> connection.call("ping", null, 10_000),
+                    "a later call fails immediately instead of waiting without a reader");
+            assertTrue(terminal.getMessage().contains("Connection has failed"),
+                    "the terminal connection state is explicit");
         }
+    }
+
+    @Test
+    @DisplayName("A malformed protocol frame poisons the connection and drains its call")
+    void malformedFrameIsTerminal() throws Exception {
+
+        FakeTransport transport = new FakeTransport(request -> null);
+
+        try (JsonRpcConnection connection = new JsonRpcConnection(transport)) {
+            Thread caller = new Thread(() -> connection.call("ping", null, 10_000));
+            var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            caller.setUncaughtExceptionHandler((t, e) -> failure.set(e));
+            caller.start();
+
+            while (transport.getSent().isEmpty()) {
+                Thread.sleep(5);
+            }
+
+            transport.push("not-json");
+            caller.join(5_000);
+
+            assertNotNull(failure.get(), "the pending call fails instead of timing out");
+            assertTrue(failure.get().getMessage().contains("Reader failed"),
+                    "the malformed frame is reported as a terminal reader failure");
+        }
+    }
+
+    @Test
+    @DisplayName("Closing fails a pending call before the transport shutdown can block")
+    void closeDrainsBeforeTransportShutdown() throws Exception {
+
+        FakeTransport transport = new FakeTransport(request -> null);
+        JsonRpcConnection connection = new JsonRpcConnection(transport);
+        Thread caller = new Thread(() -> connection.call("ping", null, 10_000));
+        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        caller.setUncaughtExceptionHandler((t, e) -> failure.set(e));
+        caller.start();
+
+        while (transport.getSent().isEmpty()) {
+            Thread.sleep(5);
+        }
+
+        connection.close();
+        caller.join(1_000);
+
+        assertNotNull(failure.get(), "the pending caller is released by close");
+        assertTrue(failure.get().getMessage().contains("Connection closed"),
+                "with a definite close, not an ambiguous timeout");
     }
 }

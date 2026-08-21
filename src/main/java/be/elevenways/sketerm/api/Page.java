@@ -36,6 +36,8 @@ public final class Page {
     private int policySerial;
     private boolean policyExhausted;
     private DenialReason policyExhaustedReason;
+    private boolean openingSettled;
+    private String openingSnapshotError;
     private boolean closed;
     private CloseResult closeResult;
     private Snapshot lastSnapshot;
@@ -44,6 +46,8 @@ public final class Page {
         this.calls = calls;
         this.handle = handle;
         this.absorb(structured);
+        this.openingSettled = Json.optBool(structured, "settled", opening != null);
+        this.openingSnapshotError = Json.optStr(structured, "snapshot_error");
         this.lastSnapshot = opening;
     }
 
@@ -54,10 +58,25 @@ public final class Page {
      * <p>Worth reaching for: a snapshot in {@link SnapshotMode#AUTO} right after opening answers
      * with an empty delta, because the server already sent that tree.</p>
      *
-     * @return the last snapshot, or null when this page was attached rather than opened
+     * @return the last snapshot, or null when this page was attached or its opening snapshot timed
+     *         out; {@link #openingSnapshotError()} preserves the latter reason
      */
     public Snapshot lastSnapshot() {
         return this.lastSnapshot;
+    }
+
+    /**
+     * @return whether the first navigation settled inside {@link OpenOptions#timeout()}
+     */
+    public boolean wasOpeningSettled() {
+        return this.openingSettled;
+    }
+
+    /**
+     * @return why the first semantic snapshot failed, or null when it succeeded or none was named
+     */
+    public String openingSnapshotError() {
+        return this.openingSnapshotError;
     }
 
     /**
@@ -838,13 +857,14 @@ public final class Page {
 
     private static Object unwrapEvalValue(Object value) {
 
-        // AIDEV-NOTE: the page bridge wraps its result in a {"value": ...} envelope, so a bare
-        // number arrives as {"value": 2}. Unwrap only that exact one-key shape; a page result that
-        // genuinely has more keys is passed through untouched.
+        // The authenticated page bridge wraps its encoded result as {"value": ...}; MCP then
+        // carries that object under structuredContent.value. Remove exactly the bridge envelope.
+        // A page object {value: 2} consequently arrives as {value: {value: 2}} and remains intact.
         if (value instanceof Map<?, ?> map && map.size() == 1 && map.containsKey("value")) {
             return map.get("value");
         }
 
         return value;
     }
+
 }

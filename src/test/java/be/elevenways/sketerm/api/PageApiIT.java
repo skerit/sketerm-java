@@ -42,6 +42,7 @@ class PageApiIT {
     private static final String RUNTIME_DIR = "/tmp/claude-1000/skjava-it";
 
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(60);
+    private static final long RUN_ID = ProcessHandle.current().pid();
 
     private static Path server;
     private static Path helper;
@@ -501,12 +502,13 @@ class PageApiIT {
 
         Files.createDirectories(Path.of(RUNTIME_DIR));
 
-        Path state = Path.of(System.getProperty("user.dir"), "build", "it-state", instance);
+        Path state = Path.of(System.getProperty("user.dir"), "build", "it-state",
+                RUN_ID + "-" + instance);
         Files.createDirectories(state);
 
         return SketermOptions.builder()
                 .binaryPath(server.toString())
-                .instanceName("skjava-it-" + instance)
+                .instanceName("skjava-it-" + RUN_ID + "-" + instance)
                 .defaultTimeout(CALL_TIMEOUT)
                 .env(clearedSketermEnvironment())
                 .env("SKETERM_WEB_BIN", helper.toString())

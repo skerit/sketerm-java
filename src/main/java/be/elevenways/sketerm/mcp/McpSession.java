@@ -147,6 +147,13 @@ public final class McpSession implements AutoCloseable {
     }
 
     /**
+     * Call a tool with a deadline for this single JSON-RPC round trip.
+     */
+    public ToolResult callToolOrThrow(String name, Map<String, Object> arguments, long timeoutMs) {
+        return this.callTool(name, arguments, timeoutMs).orThrow(name);
+    }
+
+    /**
      * Round-trip the server; Sketerm answers with an empty result.
      */
     public void ping() {

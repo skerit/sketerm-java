@@ -81,8 +81,8 @@ class PageApiTest {
         assertEquals(4, opening.nodes().size(), "step 1: four nodes parsed out of the tree");
         assertEquals("button", opening.nodes().get(2).role(), "step 1: with their roles");
 
-        // 2. Evaluation unwraps the bridge's {value} envelope
-        assertEquals(2L, ((Number) page.evaluate("1+1")).longValue(), "step 2: the envelope was unwrapped");
+        // 2. Evaluation removes the authenticated bridge's one result envelope
+        assertEquals(2L, ((Number) page.evaluate("1+1")).longValue(), "step 2: the bridge envelope was decoded");
         assertEquals(7, argInt(server, "web_eval", "pane"), "step 2: the handle was named explicitly");
 
         // 3. Acting on a ref found in the tree
@@ -149,6 +149,86 @@ class PageApiTest {
                         "step 11: " + call.tool() + " addressed the view by handle");
             }
         }
+    }
+
+    @Test
+    @DisplayName("A slow open still returns its live view when the first snapshot is unavailable")
+    void openWithoutAnOpeningSnapshot() {
+
+        FakeSketermServer server = new FakeSketermServer();
+        server.on("web_open", facts(map("view", 9, "settled", false,
+                "snapshot_error", "semantic snapshot timed out")));
+        server.on("web_tabs", map("backend", "headless", "count", 1, "helper", "ready",
+                "views", List.of(map("view", 9, "url", "https://example.test/",
+                        "title", "Example", "loading", true, "current", true))));
+        server.on("web_snapshot", facts(map("kind", "full", "document", 2, "revision", 1,
+                "snapshot", TREE)));
+
+        Page page = server.browser().openPage("https://example.test/");
+
+        assertEquals(9, page.handle(), "the minted view remains addressable");
+        assertFalse(page.wasOpeningSettled(), "the unsettled first navigation is stated");
+        assertEquals("semantic snapshot timed out", page.openingSnapshotError(),
+                "the snapshot failure is preserved for diagnostics");
+        assertNull(page.lastSnapshot(), "there was no opening tree to pretend existed");
+        assertEquals("https://example.test/", page.url(),
+                "the later web_tabs facts are adopted by the verified page");
+        assertTrue(page.isLoading(), "including the view's current loading state");
+        assertNotNull(page.snapshot(SnapshotMode.FULL), "a later snapshot can recover normally");
+    }
+
+    @Test
+    @DisplayName("An open that never produced a real view is refused instead of leaking a phantom page")
+    void openWithoutAView() {
+
+        FakeSketermServer server = new FakeSketermServer();
+        server.on("web_open", facts(map("view", 9, "settled", false,
+                "snapshot_error", "no web view is open")));
+        server.on("web_tabs", map("backend", "headless", "count", 0,
+                "helper", "ready", "views", List.of()));
+        server.onError("web_close", "not_found", "no web view with that id", false);
+
+        UnavailableException failure = assertThrows(UnavailableException.class,
+                () -> server.browser().openPage("https://example.test/"));
+
+        assertTrue(failure.getMessage().contains("not open"),
+                "the failure states that the minted handle was a phantom");
+        assertEquals(1, server.callsTo("web_close").size(),
+                "cleanup is still attempted in case the listing raced creation");
+    }
+
+    @Test
+    @DisplayName("Evaluation preserves an object whose only property is named value")
+    void evaluationPreservesAValueObject() {
+
+        FakeSketermServer server = new FakeSketermServer();
+        server.on("web_open", facts(map("view", 1, "snapshot", TREE)));
+        server.on("web_eval", facts(map("evaluated", true,
+                "value", map("value", map("value", 2)))));
+
+        Object value = server.browser().openPage("https://example.test/")
+                .evaluate("({value: 2})");
+
+        assertTrue(value instanceof Map, "the JavaScript object remains an object");
+        assertEquals(2L, ((Number) ((Map<?, ?>) value).get("value")).longValue(),
+                "with its property intact");
+    }
+
+    @Test
+    @DisplayName("The RPC deadline outlives the operation timeout by a response grace")
+    void rpcDeadlineOutlivesTheToolDeadline() {
+
+        FakeSketermServer server = new FakeSketermServer();
+        ToolCalls calls = server.toolCalls();
+
+        assertEquals(10_000, calls.rpcTimeoutMs(Map.of()),
+                "the five-second default gets response grace");
+        assertEquals(25_000, calls.rpcTimeoutMs(Map.of("timeout_ms", 20_000)),
+                "an explicit longer operation deadline controls the RPC deadline");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> ToolCalls.putTimeout(ToolCalls.args(), java.time.Duration.ofNanos(1)),
+                "a positive duration that rounds to zero milliseconds is still unusable");
     }
 
     @Test

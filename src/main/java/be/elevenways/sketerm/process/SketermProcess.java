@@ -28,7 +28,9 @@ public final class SketermProcess implements AutoCloseable {
     /** How many stderr lines the diagnostic ring keeps. */
     public static final int STDERR_RING_SIZE = 200;
 
-    private static final long DEFAULT_CLOSE_TIMEOUT_MS = 5_000;
+    // Sketerm gives its browser helper up to four seconds to exit cleanly and another two after
+    // SIGTERM. Stay beyond that window so profile cookies flush before force becomes necessary.
+    private static final long DEFAULT_CLOSE_TIMEOUT_MS = 10_000;
     private static final long DIAGNOSTIC_GRACE_MS = 500;
 
     private final List<String> command;
