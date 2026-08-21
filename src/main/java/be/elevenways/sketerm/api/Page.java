@@ -1,0 +1,645 @@
+package be.elevenways.sketerm.api;
+
+import be.elevenways.sketerm.json.Json;
+import be.elevenways.sketerm.mcp.Content;
+import be.elevenways.sketerm.mcp.ToolResult;
+
+import java.time.Duration;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/**
+ * One web view, addressed by its handle: every call sends 'pane' explicitly rather than leaning on
+ * the server's notion of the current view, so several pages can be driven from one session.
+ *
+ * <p>There is no close() yet: the server publishes no web_close in the tool table this client was
+ * written against. A view lives until the session that opened it goes away.</p>
+ */
+public final class Page {
+
+    private final ToolCalls calls;
+    private final int handle;
+
+    private String backend;
+    private String url;
+    private String title;
+    private boolean loading;
+    private int document;
+    private int revision;
+    private Snapshot lastSnapshot;
+
+    Page(ToolCalls calls, int handle, Map<String, Object> structured, Snapshot opening) {
+        this.calls = calls;
+        this.handle = handle;
+        this.absorb(structured);
+        this.lastSnapshot = opening;
+    }
+
+    /**
+     * The most recent tree this page received, which for a freshly opened page is the one web_open
+     * already sent.
+     *
+     * <p>Worth reaching for: a snapshot in {@link SnapshotMode#AUTO} right after opening answers
+     * with an empty delta, because the server already sent that tree.</p>
+     *
+     * @return the last snapshot, or null when this page was attached rather than opened
+     */
+    public Snapshot lastSnapshot() {
+        return this.lastSnapshot;
+    }
+
+    /**
+     * @return the view handle, a pane id with a GUI and a view id headless
+     */
+    public int handle() {
+        return this.handle;
+    }
+
+    /**
+     * @return "gui" or "headless", as the last answer reported it
+     */
+    public String backend() {
+        return this.backend;
+    }
+
+    /**
+     * @return the url as of the last answer; call {@link #refresh()} to re-read it
+     */
+    public String url() {
+        return this.url;
+    }
+
+    /**
+     * @return the title as of the last answer; call {@link #refresh()} to re-read it
+     */
+    public String title() {
+        return this.title;
+    }
+
+    public boolean isLoading() {
+        return this.loading;
+    }
+
+    /**
+     * @return the last known document counter, 0 when a navigation made it unknown
+     */
+    public int document() {
+        return this.document;
+    }
+
+    /**
+     * @return the last known tree revision, 0 when none has been seen
+     */
+    public int revision() {
+        return this.revision;
+    }
+
+    /**
+     * Re-read this view's facts from web_tabs.
+     *
+     * @throws NotFoundException when the view is gone
+     */
+    public PageInfo refresh() {
+
+        for (PageInfo info : Browser.listPages(this.calls)) {
+            if (info.handle() == this.handle) {
+                this.url = info.url();
+                this.title = info.title();
+                this.loading = info.loading();
+                return info;
+            }
+        }
+
+        throw new NotFoundException("View " + this.handle + " is no longer open", "web_tabs", false, null);
+    }
+
+    /**
+     * Navigate to a url and wait, bounded, for the nav state to settle.
+     */
+    public NavigationResult navigate(String url) {
+        return this.navigate(url, null);
+    }
+
+    /**
+     * @param timeout the settle budget, the server's default when null
+     */
+    public NavigationResult navigate(String url, Duration timeout) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("url", url);
+        ToolCalls.putTimeout(arguments, timeout);
+
+        return this.navigated(arguments);
+    }
+
+    public NavigationResult back() {
+        return this.navigate(NavigateAction.BACK, null);
+    }
+
+    public NavigationResult forward() {
+        return this.navigate(NavigateAction.FORWARD, null);
+    }
+
+    public NavigationResult reload() {
+        return this.navigate(NavigateAction.RELOAD, null);
+    }
+
+    public NavigationResult stop() {
+        return this.navigate(NavigateAction.STOP, null);
+    }
+
+    /**
+     * @param timeout the settle budget, the server's default when null
+     */
+    public NavigationResult navigate(NavigateAction action, Duration timeout) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("action", action.wire());
+        ToolCalls.putTimeout(arguments, timeout);
+
+        return this.navigated(arguments);
+    }
+
+    /**
+     * The accessibility-style tree as one coalesced delta since the last snapshot.
+     */
+    public Snapshot snapshot() {
+        return this.snapshot(SnapshotMode.AUTO, null);
+    }
+
+    public Snapshot snapshot(SnapshotMode mode) {
+        return this.snapshot(mode, null);
+    }
+
+    /**
+     * @param timeout the per-call budget, the server's default when null
+     */
+    public Snapshot snapshot(SnapshotMode mode, Duration timeout) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("mode", mode.wire());
+        ToolCalls.putTimeout(arguments, timeout);
+
+        Map<String, Object> structured = this.calls.structured("web_snapshot", arguments);
+        this.absorb(structured);
+        this.lastSnapshot = Snapshot.decode(this.handle, structured, "web_snapshot");
+
+        return this.lastSnapshot;
+    }
+
+    /**
+     * Reader-mode markdown of the main content, plus entities that can be acted on.
+     */
+    public Article read() {
+        return this.read(null);
+    }
+
+    public Article read(Duration timeout) {
+
+        Map<String, Object> arguments = this.args();
+        ToolCalls.putTimeout(arguments, timeout);
+
+        Map<String, Object> structured = this.calls.structured("web_read", arguments);
+        this.absorb(structured);
+
+        return Article.decode(structured);
+    }
+
+    /**
+     * Evaluate JavaScript in the page.
+     *
+     * @return the decoded value, or the text form when the result was truncated or not JSON
+     */
+    public Object evaluate(String code) {
+        return this.evaluate(code, false, null);
+    }
+
+    /**
+     * @param awaitPromise resolve a returned promise before answering
+     */
+    public Object evaluate(String code, boolean awaitPromise) {
+        return this.evaluate(code, awaitPromise, null);
+    }
+
+    /**
+     * @param timeout the per-call budget, the server's default when null
+     * @throws FailedException when the page threw, carrying the message and stack
+     */
+    public Object evaluate(String code, boolean awaitPromise, Duration timeout) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("code", code);
+
+        if (awaitPromise) {
+            arguments.put("await", true);
+        }
+
+        ToolCalls.putTimeout(arguments, timeout);
+
+        Map<String, Object> structured = this.calls.structured("web_eval", arguments);
+        this.absorb(structured);
+
+        if (structured.containsKey("value")) {
+            return unwrapEvalValue(structured.get("value"));
+        }
+
+        return Json.optStr(structured, "value_text");
+    }
+
+    /**
+     * A PNG of this view.
+     */
+    public Screenshot screenshot() {
+
+        Map<String, Object> arguments = this.args();
+        ToolResult result = this.calls.call("web_screenshot", arguments);
+        Map<String, Object> structured = this.calls.structured("web_screenshot", arguments, result);
+        this.absorb(structured);
+
+        for (Content block : result.content()) {
+            if (block instanceof Content.Image image) {
+
+                Long width = Json.optLong(structured, "width");
+                Long height = Json.optLong(structured, "height");
+                Long bytes = Json.optLong(structured, "bytes");
+
+                return new Screenshot(Base64.getDecoder().decode(image.data()),
+                        image.mimeType(),
+                        width == null ? 0 : width.intValue(),
+                        height == null ? 0 : height.intValue(),
+                        bytes == null ? 0 : bytes.intValue());
+            }
+        }
+
+        throw new ProtocolMismatchException("web_screenshot answered without an image content block");
+    }
+
+    /**
+     * Wait until the view reaches a state.
+     *
+     * @throws TimeoutException when the condition never held
+     */
+    public WaitResult waitFor(WaitFor condition) {
+        return this.waitFor(condition, null, null);
+    }
+
+    public WaitResult waitFor(WaitFor condition, String argument) {
+        return this.waitFor(condition, argument, null);
+    }
+
+    /**
+     * @param argument the text or title fragment; ignored by conditions that take none
+     * @param timeout the wait budget, the server's default when null
+     */
+    public WaitResult waitFor(WaitFor condition, String argument, Duration timeout) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("for", condition.wire());
+
+        if (argument != null && condition.acceptsArgument()) {
+            arguments.put("arg", argument);
+        }
+
+        ToolCalls.putTimeout(arguments, timeout);
+
+        Map<String, Object> structured = this.calls.structured("web_wait", arguments);
+        this.absorb(structured);
+
+        return WaitResult.decode(structured);
+    }
+
+    /**
+     * Scroll by wheel deltas and report the settled position.
+     */
+    public ScrollResult scrollBy(int dx, int dy) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("dx", dx);
+        arguments.put("dy", dy);
+
+        return this.scrolled(arguments);
+    }
+
+    public ScrollResult scrollTo(ScrollTo where) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("to", where.wire());
+
+        return this.scrolled(arguments);
+    }
+
+    /**
+     * Scroll a node into view; unlike {@link Action#SCROLL_INTO_VIEW} this reports the position.
+     */
+    public ScrollResult scrollTo(Ref ref) {
+
+        this.refuseStale(ref);
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("to", ref.id());
+
+        return this.scrolled(arguments);
+    }
+
+    /**
+     * The blocking counters plus the most recent requests.
+     */
+    public NetworkLog network() {
+        return this.network(null, null, null);
+    }
+
+    /**
+     * @return only the requests this view logged, oldest first
+     */
+    public List<NetworkLog.NetworkRequest> networkRequests() {
+        return this.network().requests();
+    }
+
+    /**
+     * @param since only entries newer than a previous {@link NetworkLog#nextSeq()}
+     * @param max the entry cap; the server's default is 50 and its ceiling 128
+     */
+    public NetworkLog network(Long since, Integer max) {
+        return this.network(null, since, max);
+    }
+
+    /**
+     * Flip content blocking for this view, or just read the counters.
+     */
+    public NetworkLog network(NetworkAction action) {
+        return this.network(action, null, null);
+    }
+
+    public NetworkLog network(NetworkAction action, Long since, Integer max) {
+
+        Map<String, Object> arguments = this.args();
+        ToolCalls.put(arguments, "action", action == null ? null : action.wire());
+        ToolCalls.put(arguments, "since", since);
+        ToolCalls.put(arguments, "max", max);
+
+        Map<String, Object> structured = this.calls.structured("web_network", arguments);
+        this.absorb(structured);
+
+        return NetworkLog.decode(structured);
+    }
+
+    /**
+     * The full text of a node the snapshot truncated.
+     */
+    public ExpandedText expand(Ref ref) {
+        return this.expand(ref, null, null);
+    }
+
+    /**
+     * @param offset where in the node's text to start
+     * @param length the page size; the server's default is 8000 and its ceiling 60000
+     */
+    public ExpandedText expand(Ref ref, Integer offset, Integer length) {
+
+        this.refuseStale(ref);
+
+        return this.expandId(ref.id(), offset, length);
+    }
+
+    /**
+     * Page the last web_eval result on this view, which the wire addresses as id 0.
+     */
+    public ExpandedText expandEvalResult(Integer offset, Integer length) {
+        return this.expandId(0, offset, length);
+    }
+
+    /**
+     * Act on a semantic id.
+     *
+     * @throws StaleRefException when the ref predates the page's current document, or when the page
+     *         itself refuses the id
+     */
+    public ActResult act(Ref ref, Action action) {
+        return this.act(ref, action, null, null);
+    }
+
+    /**
+     * @param value the text to type or the option to choose
+     */
+    public ActResult act(Ref ref, Action action, String value) {
+        return this.act(ref, action, value, null);
+    }
+
+    public ActResult act(Ref ref, Action action, String value, Duration timeout) {
+
+        this.refuseStale(ref);
+
+        if (action.requiresValue() && value == null) {
+            throw new InvalidArgsException("Action " + action + " needs a value", "web_act", false, null);
+        }
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("id", ref.id());
+        arguments.put("action", action.wire());
+        ToolCalls.put(arguments, "value", value);
+        ToolCalls.putTimeout(arguments, timeout);
+
+        Map<String, Object> structured = this.calls.structured("web_act", arguments);
+        this.absorb(structured);
+
+        ActResult result = ActResult.decode(structured);
+
+        if (result.navigated()) {
+            // A new document invalidates every id handed out for the old one, and the act reply
+            // carries no new document counter to adopt.
+            this.document = 0;
+        }
+
+        return result;
+    }
+
+    public ActResult click(Ref ref) {
+        return this.act(ref, Action.CLICK);
+    }
+
+    /**
+     * Type into a field, pick a native option, or open a custom dropdown and choose in it.
+     */
+    public ActResult fill(Ref ref, String value) {
+        return this.act(ref, Action.SET_VALUE, value);
+    }
+
+    public ActResult focus(Ref ref) {
+        return this.act(ref, Action.FOCUS);
+    }
+
+    public ActResult hover(Ref ref) {
+        return this.act(ref, Action.HOVER);
+    }
+
+    public ActResult scrollIntoView(Ref ref) {
+        return this.act(ref, Action.SCROLL_INTO_VIEW);
+    }
+
+    /**
+     * A cheap spot-check against the tree as last sent, which may be stale.
+     *
+     * @return the matching nodes in the same notation {@link Snapshot} parses
+     */
+    public List<TreeNode> query(QueryKind kind, String argument) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("kind", kind.wire());
+        ToolCalls.put(arguments, "arg", argument);
+
+        Map<String, Object> structured = this.calls.structured("web_query", arguments);
+        this.absorb(structured);
+
+        return TreeText.parse(Json.optStr(structured, "matches"));
+    }
+
+    /**
+     * @return the first node whose name contains the text, addressable in this page's document
+     */
+    public Optional<Ref> findText(String text) {
+
+        for (TreeNode node : this.query(QueryKind.FIND_TEXT, text)) {
+            return Optional.of(new Ref(node.id(), this.document, this.revision));
+        }
+
+        return Optional.empty();
+    }
+
+    /**
+     * Find a node by its text and click it, the one-liner for "press the button that says X".
+     *
+     * @throws NotFoundException when nothing in the last-sent tree carries that text
+     */
+    public ActResult clickText(String text) {
+
+        Ref ref = this.findText(text).orElseThrow(() -> new NotFoundException(
+                "No node in the last-sent tree has a name containing '" + text
+                        + "'; take a snapshot if the page just changed",
+                "web_query", false, null));
+
+        return this.click(ref);
+    }
+
+    @Override
+    public String toString() {
+        return "Page[" + this.handle + " " + this.url + "]";
+    }
+
+    /**
+     * Adopt every fact the answer carried; absent fields leave the previous value alone.
+     */
+    private void absorb(Map<String, Object> structured) {
+
+        if (structured == null) {
+            return;
+        }
+
+        String backend = Json.optStr(structured, "backend");
+        String url = Json.optStr(structured, "url");
+        String title = Json.optStr(structured, "title");
+
+        if (backend != null) {
+            this.backend = backend;
+        }
+
+        if (url != null) {
+            this.url = url;
+        }
+
+        if (title != null) {
+            this.title = title;
+        }
+
+        if (structured.containsKey("loading")) {
+            this.loading = Json.optBool(structured, "loading", false);
+        }
+
+        Long document = Json.optLong(structured, "document");
+        Long revision = Json.optLong(structured, "revision");
+
+        if (document != null) {
+            this.document = document.intValue();
+        }
+
+        if (revision != null) {
+            this.revision = revision.intValue();
+        }
+    }
+
+    private Map<String, Object> args() {
+
+        Map<String, Object> arguments = ToolCalls.args();
+        arguments.put("pane", this.handle);
+
+        return arguments;
+    }
+
+    private NavigationResult navigated(Map<String, Object> arguments) {
+
+        Map<String, Object> structured = this.calls.structured("web_navigate", arguments);
+        String before = this.url;
+        this.absorb(structured);
+
+        NavigationResult result = NavigationResult.decode(structured);
+
+        if (before != null && !before.equals(this.url)) {
+            // web_navigate reports no document counter, so the ids of the page we left are simply
+            // unknowable until the next snapshot; 0 means "let the server judge staleness".
+            this.document = 0;
+        }
+
+        return result;
+    }
+
+    private ScrollResult scrolled(Map<String, Object> arguments) {
+
+        Map<String, Object> structured = this.calls.structured("web_scroll", arguments);
+        this.absorb(structured);
+
+        return ScrollResult.decode(structured);
+    }
+
+    private ExpandedText expandId(int id, Integer offset, Integer length) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("id", id);
+        ToolCalls.put(arguments, "offset", offset);
+        ToolCalls.put(arguments, "len", length);
+
+        Map<String, Object> structured = this.calls.structured("web_expand", arguments);
+        this.absorb(structured);
+
+        return ExpandedText.decode(structured);
+    }
+
+    /**
+     * AIDEV-NOTE: staleness is judged per DOCUMENT, not per revision. A revision moves on every
+     * change the page makes, including the one an act itself causes, so refusing a ref older than
+     * the current revision would reject clicking the same button twice - which the server accepts.
+     * A new document is what actually invalidates every id, and the server agrees ("unknown id").
+     */
+    private void refuseStale(Ref ref) {
+
+        if (!ref.hasProvenance() || this.document <= 0 || ref.document() == this.document) {
+            return;
+        }
+
+        throw new StaleRefException("Ref " + ref + " came from document " + ref.document()
+                + " but this page is on document " + this.document
+                + "; take a fresh snapshot and act on the new ref", ref);
+    }
+
+    private static Object unwrapEvalValue(Object value) {
+
+        // AIDEV-NOTE: the page bridge wraps its result in a {"value": ...} envelope, so a bare
+        // number arrives as {"value": 2}. Unwrap only that exact one-key shape; a page result that
+        // genuinely has more keys is passed through untouched.
+        if (value instanceof Map<?, ?> map && map.size() == 1 && map.containsKey("value")) {
+            return map.get("value");
+        }
+
+        return value;
+    }
+}
