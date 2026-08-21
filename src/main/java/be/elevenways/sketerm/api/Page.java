@@ -31,6 +31,11 @@ public final class Page {
     private String profile;
     private ProfileKind profileKind;
     private int context;
+    private boolean policyActive;
+    private PolicySource policySource;
+    private int policySerial;
+    private boolean policyExhausted;
+    private DenialReason policyExhaustedReason;
     private boolean closed;
     private CloseResult closeResult;
     private Snapshot lastSnapshot;
@@ -122,6 +127,87 @@ public final class Page {
      */
     public int context() {
         return this.context;
+    }
+
+    /**
+     * @return whether an enforced network policy is installed on this view, as of the last answer
+     *         that reported it (web_open and {@link #policy()} do; nothing else does)
+     */
+    public boolean isPolicyActive() {
+        return this.policyActive;
+    }
+
+    /**
+     * @return where the installed policy came from, null when no answer has said
+     */
+    public PolicySource policySource() {
+        return this.policySource;
+    }
+
+    /**
+     * @return the policy generation, which a {@link #tightenPolicy} moves; 0 when unpoliced
+     */
+    public int policySerial() {
+        return this.policySerial;
+    }
+
+    /**
+     * Whether a policy budget has LATCHED for this view.
+     *
+     * <p>Every answer this page decodes carries the fact when it is true, so this is up to date
+     * without a round trip of its own. Latching is permanent per view: reads keep working, and
+     * every tool that would cause traffic is refused with a {@link RefusedException} from here on.
+     * {@link #policy()} has the accounting.</p>
+     */
+    public boolean isPolicyExhausted() {
+        return this.policyExhausted;
+    }
+
+    /**
+     * @return which budget latched, null while none has
+     */
+    public DenialReason policyExhaustedReason() {
+        return this.policyExhaustedReason;
+    }
+
+    /**
+     * This view's enforced policy and its live accounting: requests, bytes, navigations, time left,
+     * refusals by reason, and whether a budget latched.
+     *
+     * <p>This is the machine-readable half of every policy refusal sentence, and it keeps answering
+     * after the budgets are spent.</p>
+     *
+     * @throws UnavailableException with a GUI attached: policies are a headless-only feature
+     */
+    public PolicyStatus policy() {
+
+        Map<String, Object> structured = this.calls.structured("web_policy", this.args());
+        this.absorb(structured);
+
+        return PolicyStatus.decode(structured);
+    }
+
+    /**
+     * Narrow this view's live policy.
+     *
+     * <p>A live policy can only TIGHTEN - host lists shrink, budgets lower, blocked types grow,
+     * allow_private only turns off - so what already ran under the old policy stays within the new
+     * one's story. A single field that would loosen is named in {@link PolicyUpdate#ignored()}
+     * rather than applied.</p>
+     *
+     * @throws RefusedException when EVERY requested change would loosen the live policy
+     * @throws ConflictException when this view runs no policy at all: one is installed at open and
+     *         never added to a live view, whose earlier requests would predate it
+     */
+    public PolicyUpdate tightenPolicy(NetworkPolicy policy) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("policy", policy.toWire());
+
+        Map<String, Object> structured = this.calls.structured("web_policy_set", arguments);
+        this.absorb(structured);
+
+        return PolicyUpdate.decode(structured);
     }
 
     /**
@@ -640,6 +726,8 @@ public final class Page {
             this.context = context == null ? 0 : context.intValue();
         }
 
+        this.absorbPolicy(structured);
+
         Long document = Json.optLong(structured, "document");
         Long revision = Json.optLong(structured, "revision");
 
@@ -649,6 +737,39 @@ public final class Page {
 
         if (revision != null) {
             this.revision = revision.intValue();
+        }
+    }
+
+    /**
+     * AIDEV-NOTE: the exhaustion fact is emitted only when it is TRUE - an unpoliced view and a
+     * view whose budgets still hold both simply omit it - so absence must never be read as "the
+     * budgets came back". It cannot: latching is permanent per view, so once absorbed the flag
+     * stays until the page is closed. The policy_* trio, by contrast, is carried only by web_open
+     * and web_policy(_set), which is why each is adopted per key rather than per answer.
+     */
+    private void absorbPolicy(Map<String, Object> structured) {
+
+        if (structured.containsKey("policy_active")) {
+            this.policyActive = Json.optBool(structured, "policy_active", false);
+        }
+
+        PolicySource source = PolicySource.fromWire(Json.optStr(structured, "policy_source"));
+
+        if (source != null) {
+            this.policySource = source;
+            this.policyActive = this.policyActive || source != PolicySource.NONE;
+        }
+
+        Long serial = Json.optLong(structured, "policy_serial");
+
+        if (serial != null) {
+            this.policySerial = serial.intValue();
+        }
+
+        if (Json.optBool(structured, "policy_exhausted", false)) {
+            this.policyExhausted = true;
+            this.policyExhaustedReason = DenialReason.requireExhaustion(
+                    Json.optStr(structured, "policy_exhausted_reason"));
         }
     }
 

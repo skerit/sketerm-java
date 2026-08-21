@@ -30,7 +30,12 @@ public final class Browser {
     }
 
     /**
-     * @param options the viewport and settle budget; null means the server's defaults
+     * @param options the viewport, identity, settle budget and enforced policy; null means the
+     *                server's defaults
+     * @throws UnavailableException when a policied open meets a helper without the net-policy
+     *         capability - NOTHING is opened, there is deliberately no unpoliced fallback
+     * @throws ConflictException when the helper cannot hold another policy (its table is full);
+     *         the view is closed again un-navigated
      */
     public Page openPage(String url, OpenOptions options) {
 
@@ -48,6 +53,10 @@ public final class Browser {
 
             if (options.ephemeral()) {
                 arguments.put("ephemeral", true);
+            }
+
+            if (options.policy() != null) {
+                arguments.put("policy", options.policy().toWire());
             }
         }
 
@@ -130,6 +139,39 @@ public final class Browser {
         arguments.put("profile", ProfileNames.require(name, "web_profile_reset"));
 
         return ProfileResetResult.decode(this.calls.structured("web_profile_reset", arguments));
+    }
+
+    /**
+     * Register a profile's SESSION-DEFAULT network policy, applied by every later open in that
+     * profile whose own call carries no policy.
+     *
+     * <p>The registration is in memory and gone when the server exits - deliberately, since a
+     * durable copy could be silently lost by a store rebuild - which is what the answer's
+     * {@link ProfilePolicy#durable()} keeps saying out loud.</p>
+     *
+     * @throws UnavailableException with a GUI attached: policies are a headless-only feature
+     * @throws InvalidArgsException when the name breaks {@link ProfileNames}
+     */
+    public ProfilePolicy setProfilePolicy(String name, NetworkPolicy policy) {
+
+        Map<String, Object> arguments = ToolCalls.args();
+        arguments.put("profile", ProfileNames.require(name, "web_policy_set"));
+        arguments.put("policy", policy.toWire());
+
+        return ProfilePolicy.decode(name, this.calls.structured("web_policy_set", arguments));
+    }
+
+    /**
+     * Read back a profile's registered session-default policy.
+     *
+     * @throws NotFoundException when the profile has no session default registered
+     */
+    public ProfilePolicy profilePolicy(String name) {
+
+        Map<String, Object> arguments = ToolCalls.args();
+        arguments.put("profile", ProfileNames.require(name, "web_policy"));
+
+        return ProfilePolicy.decode(name, this.calls.structured("web_policy", arguments));
     }
 
     /**

@@ -1,10 +1,12 @@
 package be.elevenways.sketerm.api;
 
+import be.elevenways.sketerm.json.Json;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
@@ -233,6 +235,212 @@ class PageApiIT {
                 browser.resetProfile(PROFILE);
             } finally {
                 fixture.stop();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("A policied view enforces its allow-list, latches its budget, and captures as evidence")
+    void policyAndEvidenceJourney(@TempDir Path evidenceRoot) throws IOException {
+
+        assumeTrue(server != null, "the sketerm binary is not built in the sibling checkout");
+        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+
+        try (Sketerm sketerm = Sketerm.launch(options("policy").build())) {
+
+            List<String> tools = sketerm.session().listTools().stream()
+                    .map(descriptor -> descriptor.name())
+                    .toList();
+
+            assumeTrue(tools.contains("web_policy") && tools.contains("web_policy_set"),
+                    "the copied sketerm predates enforced network policy (rebuild the sibling"
+                            + " checkout: zig build)");
+
+            Browser browser = sketerm.browser();
+            PolicyFixture fixture = PolicyFixture.start();
+
+            try {
+                // AIDEV-NOTE: the fixture is loopback, so the policy MUST allow private addresses
+                // or nothing loads at all. The offsite subresource points at "localhost" on the
+                // very same port: the allow-list matches host STRINGS, and 127.0.0.1 and localhost
+                // are two different ones, so the image is cancelled before a socket is opened -
+                // which is why one http server is enough to prove a cross-host refusal.
+                NetworkPolicy policy = NetworkPolicy.builder()
+                        .allowHosts(PolicyFixture.HOST)
+                        .allowPrivateAddresses(true)
+                        .maxRequests(50)
+                        .build();
+
+                // 21. A policied open succeeds and the view says what it is running
+                Page page = browser.openPage(fixture.url("/page"), OpenOptions.withNetworkPolicy(policy));
+
+                assertTrue(page.isPolicyActive(), "step 21: the view runs an enforced policy");
+                assertEquals(PolicySource.CALL, page.policySource(),
+                        "step 21: supplied by this open call");
+                assertTrue(page.policySerial() > 0, "step 21: under a real policy generation");
+
+                // 22. The accounting is live and the allowed traffic really happened
+                PolicyStatus status = page.policy();
+
+                assertTrue(status.active(), "step 22: web_policy agrees a policy is installed");
+                assertTrue(status.requests() > 0,
+                        "step 22: allowed requests were counted, got " + status.requests());
+                assertTrue(status.navigations() > 0, "step 22: as was the main-frame load");
+                assertFalse(status.durable(), "step 22: and a policy never outlives the server");
+                assertEquals(DenialReason.NONE, status.exhaustedReason(),
+                        "step 22: nothing latched under a generous cap");
+                assertEquals(List.of(PolicyFixture.HOST), status.policy().allowHosts(),
+                        "step 22: the echo re-typed into the host that was allowed");
+
+                // 23. The offsite subresource was refused, and the log says why
+                List<NetworkLog.NetworkRequest> requests = page.networkRequests();
+
+                assertTrue(status.denied(DenialReason.SUB_HOST) > 0,
+                        "step 23: the localhost image is not on the allow-list, denied was "
+                                + status.denied() + " and the log was " + requests);
+
+                assertTrue(requests.stream().anyMatch(entry -> entry.reason() != null),
+                        "step 23: the log entries carry a typed reason");
+                assertTrue(requests.stream().anyMatch(NetworkLog.NetworkRequest::refusedByPolicy),
+                        "step 23: at least one of them was the enforced policy's own decision");
+                assertTrue(page.evaluate("document.title") instanceof String,
+                        "step 23: while the allowed document itself loaded and runs script");
+
+                // 24. A live policy can only tighten; the loosening half is named, not applied
+                PolicyUpdate update = page.tightenPolicy(NetworkPolicy.builder()
+                        .allowHosts(PolicyFixture.HOST, "example.com")
+                        .allowPrivateAddresses(true)
+                        .blockTypes(ResourceType.IMAGE)
+                        .build());
+
+                assertTrue(update.changedAnything(),
+                        "step 24: blocking a resource class narrows, tightened was " + update.tightened());
+                assertTrue(update.ignored().contains("allow_hosts"),
+                        "step 24: widening the host list is refused by name, ignored was "
+                                + update.ignored());
+
+                // 25. A tiny budget latches on a second view, permanently
+                Page tiny = browser.openPage(fixture.url("/heavy"),
+                        OpenOptions.withNetworkPolicy(NetworkPolicy.builder()
+                                .allowHosts(PolicyFixture.HOST)
+                                .allowPrivateAddresses(true)
+                                .maxRequests(2)
+                                .build()));
+
+                PolicyStatus spent = tiny.policy();
+
+                assertTrue(spent.exhausted(), "step 25: two requests is not enough for that page");
+                assertEquals(DenialReason.REQUEST_CAP, spent.exhaustedReason(),
+                        "step 25: and the request cap is what went");
+                assertTrue(spent.exhaustedReason().latches(),
+                        "step 25: which is a budget reason, so it latched for good");
+                assertTrue(tiny.isPolicyExhausted(),
+                        "step 25: the page absorbed the fact from that answer");
+
+                // 26. Past the latch a traffic tool is refused, non-retryably
+                RefusedException refused = assertThrows(RefusedException.class,
+                        () -> tiny.navigate(fixture.url("/page")),
+                        "step 26: a navigation would be new traffic");
+
+                assertEquals(ErrorCode.REFUSED, refused.getCode(), "step 26: as a refusal");
+                assertFalse(refused.isRetryable(), "step 26: that retrying cannot fix");
+
+                // 27. While the reads keep answering, still carrying the fact
+                Snapshot afterLatch = tiny.snapshot(SnapshotMode.FULL);
+
+                assertNotNull(afterLatch.tree(), "step 27: a read tool still answers");
+                assertTrue(tiny.isPolicyExhausted(),
+                        "step 27: and the exhaustion fact rides every one of them");
+
+                tiny.close();
+
+                // 28. Evidence of the policied page persists as a folder that parses back
+                Evidence evidence = Evidence.capture(page);
+
+                assertNotNull(evidence.screenshot(), "step 28: the png came back");
+                assertEquals(64, evidence.screenshotSha256().length(),
+                        "step 28: fingerprinted with a real sha256");
+                assertNotNull(evidence.policy(), "step 28: the enforced policy is attested");
+                assertTrue(evidence.network().totalRequests() > 0, "step 28: as is the traffic");
+
+                Path folder = evidence.writeTo(evidenceRoot.resolve("policied-page"));
+
+                assertTrue(Files.exists(folder.resolve("screenshot.png")), "step 28: the png is on disk");
+                assertTrue(Files.exists(folder.resolve("snapshot.txt")), "step 28: so is the tree");
+                assertTrue(Files.exists(folder.resolve("article.md")), "step 28: and the markdown");
+
+                Map<String, Object> manifest = Json.parseObject(
+                        Files.readString(folder.resolve(Evidence.MANIFEST), StandardCharsets.UTF_8));
+
+                assertEquals(evidence.finalUrl(), manifest.get("final_url"),
+                        "step 28: the manifest parses and names the page it describes");
+                assertNotNull(manifest.get("policy"), "step 28: with the policy accounting in it");
+
+                page.close();
+            } finally {
+                fixture.stop();
+            }
+        }
+    }
+
+    /**
+     * A loopback origin whose page pulls same-host subresources plus one that is OFFSITE by host
+     * string only ("localhost" against an allow-list of "127.0.0.1").
+     */
+    private record PolicyFixture(HttpServer http) {
+
+        /** The literal the policy allows; "localhost" is deliberately a different host to it. */
+        static final String HOST = "127.0.0.1";
+
+        static PolicyFixture start() throws IOException {
+
+            HttpServer http = HttpServer.create(new InetSocketAddress(HOST, 0), 0);
+            int[] port = new int[1];
+
+            http.createContext("/page", exchange -> respond(exchange, "text/html",
+                    "<html><head><title>Policy IT</title>"
+                            + "<link rel=\"stylesheet\" href=\"/style.css\"></head><body>"
+                            + "<h1>Policied</h1>"
+                            + "<p>An article paragraph long enough for the reader to keep.</p>"
+                            + "<img src=\"/local.png\" alt=\"local\">"
+                            + "<img src=\"http://localhost:" + port[0] + "/local.png\" alt=\"offsite\">"
+                            + "<script src=\"/a.js\"></script>"
+                            + "</body></html>"));
+
+            http.createContext("/heavy", exchange -> respond(exchange, "text/html",
+                    "<html><head><title>Heavy</title>"
+                            + "<link rel=\"stylesheet\" href=\"/style.css\"></head><body>"
+                            + "<img src=\"/local.png?1\"><img src=\"/local.png?2\">"
+                            + "<img src=\"/local.png?3\"><script src=\"/a.js\"></script>"
+                            + "</body></html>"));
+
+            http.createContext("/style.css", exchange -> respond(exchange, "text/css", "body{color:#111}"));
+            http.createContext("/a.js", exchange -> respond(exchange, "text/javascript", "window.ok=1;"));
+            http.createContext("/local.png", exchange -> respond(exchange, "text/plain", "x"));
+
+            port[0] = http.getAddress().getPort();
+            http.start();
+
+            return new PolicyFixture(http);
+        }
+
+        String url(String path) {
+            return "http://" + HOST + ":" + this.http.getAddress().getPort() + path;
+        }
+
+        void stop() {
+            this.http.stop(0);
+        }
+
+        private static void respond(HttpExchange exchange, String type, String body) throws IOException {
+
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+
+            exchange.getResponseHeaders().add("Content-Type", type + "; charset=utf-8");
+            exchange.sendResponseHeaders(200, bytes.length);
+
+            try (var stream = exchange.getResponseBody()) {
+                stream.write(bytes);
             }
         }
     }

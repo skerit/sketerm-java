@@ -22,6 +22,9 @@ public record NetworkLog(boolean blockingEnabled,
      * One logged request; status, size and duration only exist once it completed.
      *
      * @param type the resource type the engine classified it as, for example document or script
+     * @param reason why a blocked entry was refused - {@link DenialReason#FILTER_LIST} is the
+     *               adblock engine, every other member the enforced policy - and null when the
+     *               answer named none at all, which a server predating policies always does
      */
     public record NetworkRequest(long seq,
                                  boolean blocked,
@@ -31,7 +34,15 @@ public record NetworkLog(boolean blockingEnabled,
                                  Integer status,
                                  Long durationMs,
                                  Long size,
-                                 boolean pending) {
+                                 boolean pending,
+                                 DenialReason reason) {
+
+        /**
+         * @return whether the enforced policy, rather than the ad filter, refused this request
+         */
+        public boolean refusedByPolicy() {
+            return this.blocked && this.reason != null && this.reason.isPolicy();
+        }
     }
 
     static NetworkLog decode(Map<String, Object> structured) {
@@ -53,7 +64,8 @@ public record NetworkLog(boolean blockingEnabled,
                         status == null ? null : status.intValue(),
                         Json.optLong(entry, "duration_ms"),
                         Json.optLong(entry, "size"),
-                        Json.optBool(entry, "pending", false)));
+                        Json.optBool(entry, "pending", false),
+                        DenialReason.optional(Json.optStr(entry, "reason"))));
             }
         }
 

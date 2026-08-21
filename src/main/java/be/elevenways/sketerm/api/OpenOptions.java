@@ -13,12 +13,15 @@ import java.time.Duration;
  * @param timeout the budget for the first load to settle (server default 20s)
  * @param profile a named persistent identity, headless only; null for the shared default jar
  * @param ephemeral open in a fresh throwaway identity, destroyed with the view
+ * @param policy an ENFORCED network policy, installed before the view's first request; headless
+ *               only, and fail-closed - a helper that cannot enforce it opens nothing
  */
 public record OpenOptions(Integer width,
                           Integer height,
                           Duration timeout,
                           String profile,
-                          boolean ephemeral) {
+                          boolean ephemeral,
+                          NetworkPolicy policy) {
 
     public OpenOptions {
 
@@ -34,11 +37,21 @@ public record OpenOptions(Integer width,
     }
 
     public static OpenOptions defaults() {
-        return new OpenOptions(null, null, null, null, false);
+        return new OpenOptions(null, null, null, null, false, null);
     }
 
     public static OpenOptions viewport(int width, int height) {
-        return new OpenOptions(width, height, null, null, false);
+        return new OpenOptions(width, height, null, null, false, null);
+    }
+
+    /**
+     * Open under an enforced network policy.
+     *
+     * <p>Fail closed, exactly as the server is: a browser helper without the net-policy capability
+     * refuses the open and NOTHING is opened, never a view running unpoliced.</p>
+     */
+    public static OpenOptions withNetworkPolicy(NetworkPolicy policy) {
+        return defaults().withPolicy(policy);
     }
 
     /**
@@ -59,11 +72,18 @@ public record OpenOptions(Integer width,
     }
 
     public OpenOptions withViewport(int width, int height) {
-        return new OpenOptions(width, height, this.timeout, this.profile, this.ephemeral);
+        return new OpenOptions(width, height, this.timeout, this.profile, this.ephemeral, this.policy);
     }
 
     public OpenOptions withTimeout(Duration timeout) {
-        return new OpenOptions(this.width, this.height, timeout, this.profile, this.ephemeral);
+        return new OpenOptions(this.width, this.height, timeout, this.profile, this.ephemeral, this.policy);
+    }
+
+    /**
+     * @param policy the enforced policy, or null to open unpoliced
+     */
+    public OpenOptions withPolicy(NetworkPolicy policy) {
+        return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, policy);
     }
 
     /**
@@ -71,20 +91,20 @@ public record OpenOptions(Integer width,
      *         already ask for an ephemeral identity (say {@link #withDefaultIdentity()} first)
      */
     public OpenOptions withProfile(String profile) {
-        return new OpenOptions(this.width, this.height, this.timeout, profile, this.ephemeral);
+        return new OpenOptions(this.width, this.height, this.timeout, profile, this.ephemeral, this.policy);
     }
 
     /**
      * @throws InvalidArgsException when these options already name a profile
      */
     public OpenOptions withEphemeral() {
-        return new OpenOptions(this.width, this.height, this.timeout, this.profile, true);
+        return new OpenOptions(this.width, this.height, this.timeout, this.profile, true, this.policy);
     }
 
     /**
      * Drop the identity choice, back to the shared default cookie jar.
      */
     public OpenOptions withDefaultIdentity() {
-        return new OpenOptions(this.width, this.height, this.timeout, null, false);
+        return new OpenOptions(this.width, this.height, this.timeout, null, false, this.policy);
     }
 }

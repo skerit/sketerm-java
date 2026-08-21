@@ -16,7 +16,7 @@ Each layer knows only the one below it, so a future HTTP transport is a swap and
 | `process` | `SketermProcess`: argv/cwd/env, UTF-8 line streams, a 200-line stderr ring for diagnostics, `close()` = close stdin, destroy, wait, force-kill, plus a shutdown hook so a crashed JVM never orphans a browser |
 | `rpc` | `SketermTransport` (the seam), `StdioTransport` (newline framing), `JsonRpcConnection` (id correlation, per-call timeouts, EOF drains every pending call with the child's exit code and stderr tail) |
 | `mcp` | `McpSession` (initialize, tools/list, tools/call, ping), `ToolDescriptor`, `ToolResult`, `Content`, `ToolException` |
-| `api` | The Playwright-SHAPED synchronous face over the browser tool group: `Sketerm`, `Browser`, `Page`, `Snapshot`/`Ref`, and one typed exception per error code |
+| `api` | The Playwright-SHAPED synchronous face over the browser tool group: `Sketerm`, `Browser`, `Page`, `Snapshot`/`Ref`, `NetworkPolicy`/`PolicyStatus`, `Evidence`, and one typed exception per error code |
 
 ## The result decode rule
 
@@ -94,7 +94,8 @@ from one session without the server's "current view" ever deciding for you.
 
 The tool schemas own the vocabularies; the enums mirror them one for one and carry their wire token
 (`Action`, `NavigateAction`, `WaitFor`, `ScrollTo`, `SnapshotMode`, `QueryKind`, `NetworkAction`,
-`ErrorCode`). An unknown token fails closed rather than being folded into a neighbour.
+`ErrorCode`, `ProfileKind`, `ResourceType`, `UrlScheme`, `PolicySource`, `DenialReason`). An unknown
+token fails closed rather than being folded into a neighbour.
 
 Failures are typed off `structuredContent.error.code` by one switch in `SketermApiException.from`:
 `InvalidArgsException`, `NotFoundException`, `UnavailableException`, `TimeoutException`,
@@ -151,6 +152,84 @@ The rules the wire contract insists on, mirrored here:
 - a `context` id is opaque and is retired by a reset, so a profile is addressed by NAME everywhere;
 - `supportsProfiles()` reads the `capabilities` report's `web_profiles` flag, the preflight before
   offering the feature at all.
+
+### Enforced network policy
+
+A headless view can be opened under a policy the browser engine enforces itself, deciding every
+request before it leaves the process:
+
+```java
+NetworkPolicy policy = NetworkPolicy.builder()
+        .allowHosts("example.com", "cdn.example.com")
+        .allowSubresourceHosts("static.example.com")
+        .blockTypes(ResourceType.MEDIA, ResourceType.FONT)
+        .allowSchemes(UrlScheme.HTTPS)
+        .maxRequests(60)
+        .maxBytes(8_000_000L)
+        .maxNavigations(4)
+        .deadline(Duration.ofSeconds(30))
+        .build();
+
+Page page = browser.openPage("https://example.com/", OpenOptions.withNetworkPolicy(policy));
+
+PolicyStatus status = page.policy();
+System.out.println(status.requests() + " requests, " + status.bytes() + " bytes");
+System.out.println(status.denied(DenialReason.SUB_HOST) + " subresource hosts refused");
+
+// A live policy can only ever be narrowed; a field that would widen it is named, not applied
+PolicyUpdate update = page.tightenPolicy(NetworkPolicy.builder()
+        .blockTypes(ResourceType.IMAGE)
+        .maxRequests(20)
+        .build());
+
+System.out.println(update.tightened() + " narrowed, " + update.ignored() + " refused as loosenings");
+
+// And a profile can carry a session default for every later open in it
+browser.setProfilePolicy("work", policy);
+```
+
+The rules the wire contract insists on, mirrored here:
+
+- policies are HEADLESS ONLY, and are installed at OPEN and never added to a live view, whose
+  earlier requests would predate them;
+- the refusal is FAIL CLOSED: a helper without the net-policy capability answers `unavailable` and
+  NOTHING is opened, never a view running unpoliced, and past the helper's policied-view cap it is
+  a `conflict` instead;
+- budgets LATCH, permanently and per view. Past the first one that is hit, `web_navigate`,
+  `web_act`, `web_eval` and a load wait all throw `RefusedException` (non-retryable), while read
+  tools keep answering and carry the fact - so `page.isPolicyExhausted()` and
+  `page.policyExhaustedReason()` are up to date after any call, and `page.policy()` has the
+  accounting;
+- `max_bytes` is accounted at response completion, so the response that CROSSES the cap completes
+  and the NEXT request is refused; a redirect hop counts as a navigation;
+- nothing is durable: `PolicyStatus.durable()` is always false, because a policy and a profile
+  default live for this MCP server's lifetime by design;
+- a host entry is a bare name or IP literal, so `*`, a scheme, a port or a path is refused by
+  `PolicyHosts` before the call goes out - write no policy rather than an allow-all one.
+
+The vocabularies mirror the schema enums one for one: `ResourceType` (11 names), `UrlScheme` (7),
+`PolicySource` (3) and `DenialReason` (12), which is also the home of the 5-name `exhausted_reason`
+- that shorter list is derived as the members whose `latches()` is true, never restated.
+
+### Evidence capture
+
+`Evidence` freezes one page at one moment out of the reads that already exist, so the pieces are
+known to describe the same moment rather than three round trips apart:
+
+```java
+Evidence evidence = Evidence.capture(page);
+
+System.out.println(evidence.finalUrl() + " at " + evidence.capturedAt());
+System.out.println("screenshot sha256: " + evidence.screenshotSha256());
+
+evidence.writeTo(Path.of("build/evidence/run-1"));
+// -> evidence.json, screenshot.png, snapshot.txt, article.md
+```
+
+`capture(page, EnumSet.of(Part.SCREENSHOT, Part.NETWORK))` takes only the parts named. Every part is
+a READ tool, so a capture still works on a view whose budgets have latched - which is exactly the
+view whose evidence someone wants. A policy is attested only when one is actually installed, rather
+than recorded as a row of zeroes that would read like enforcement.
 
 ## Building
 
