@@ -105,7 +105,8 @@ mutating call must not be retried blindly.
 
 The tool schemas own the vocabularies; the enums mirror them one for one and carry their wire token
 (`Action`, `NavigateAction`, `WaitFor`, `ScrollTo`, `SnapshotMode`, `QueryKind`, `NetworkAction`,
-`ErrorCode`, `ProfileKind`, `ResourceType`, `UrlScheme`, `PolicySource`, `DenialReason`). An unknown
+`ErrorCode`, `ProfileKind`, `ResourceType`, `UrlScheme`, `PolicySource`, `DenialReason`,
+`DownloadState`, `EvalFormat`). An unknown
 token fails closed rather than being folded into a neighbour.
 
 Failures are typed off `structuredContent.error.code` by one switch in `SketermApiException.from`:
@@ -221,6 +222,46 @@ The rules the wire contract insists on, mirrored here:
 The vocabularies mirror the schema enums one for one: `ResourceType` (11 names), `UrlScheme` (7),
 `PolicySource` (3) and `DenialReason` (12), which is also the home of the 5-name `exhausted_reason`
 - that shorter list is derived as the members whose `latches()` is true, never restated.
+
+### Downloads and bulk results
+
+Bytes leave a page in two ways, and neither passes through the session. `page.download` fetches a
+url INSIDE this view's browser, so its cookies, session and route carry and a file behind a login
+needs no token of its own; `page.evaluateToFile` writes a whole eval result to disk.
+
+```java
+if (sketerm.browser().supportsDownloads()) {
+
+    Download one = page.download("https://example.com/report.pdf", Path.of("/tmp/report.pdf"));
+    System.out.println(one.state() + " " + one.bytes() + " " + one.sha256());
+
+    DownloadBatch batch = page.download(urls, Path.of("/tmp/out"));
+    System.out.println(batch.completed() + " done, " + batch.failed() + " failed");
+
+    for (Download known : page.downloads().downloads()) {
+        System.out.println(known.path() + " " + known.state());
+    }
+}
+
+EvaluatedFile rows = page.evaluateToFile("[...document.links].map(a => a.href)",
+        Path.of("/tmp/rows.json"));
+System.out.println(rows.bytes() + " bytes of " + rows.format());
+```
+
+The rules the wire contract insists on, mirrored here:
+
+- a `TIMED_OUT` file is DATA, not a failure - the call's budget ran out while the transfer was still
+  running - so only `FAILED` says the file will never arrive, and `page.downloads()` can say later
+  what became of it;
+- a batch is capped at `DownloadBatch.MAX_URLS` (64) and its files are fetched ONE AT A TIME, so the
+  urls the budget never reached come back `NOT_STARTED` and the call is repeated with what is left;
+- a batch is never all-or-nothing: one bad url is one failed entry beside the files that landed;
+- `page.downloads()` LISTS what this view knows, page-initiated downloads included - those land in
+  the user's XDG download directory and are the only way a save button's file is found afterwards;
+- every destination is an absolute path on the machine running the server, refused here before the
+  call goes out;
+- `supportsDownloads()` reads the `capabilities` report's `web_downloads` flag, the preflight before
+  offering the feature at all.
 
 ### Evidence capture
 

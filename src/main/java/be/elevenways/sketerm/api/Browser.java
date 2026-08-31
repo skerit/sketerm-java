@@ -221,7 +221,23 @@ public final class Browser {
      * @return the capabilities report's web_profiles flag, false when the server names none
      */
     public boolean supportsProfiles() {
-        return Json.optBool(this.calls.structured("capabilities", ToolCalls.args()), "web_profiles", false);
+        return this.capability("web_profiles");
+    }
+
+    /**
+     * Preflight: whether this server can download a url through a view's own browser.
+     *
+     * <p>False also means {@link Page#downloads()} has nothing to list, since a helper without the
+     * capability answers no download at all.</p>
+     *
+     * @return the capabilities report's web_downloads flag, false when the server names none
+     */
+    public boolean supportsDownloads() {
+        return this.capability("web_downloads");
+    }
+
+    private boolean capability(String fact) {
+        return Json.optBool(this.calls.structured("capabilities", ToolCalls.args()), fact, false);
     }
 
     static List<PageInfo> listPages(ToolCalls calls) {

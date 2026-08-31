@@ -9,7 +9,9 @@ public enum QueryKind implements WireValue {
     FIND_TEXT("find_text"),
     /** Children of the node id in the argument. */
     SUBTREE("subtree"),
-    FOCUSED("focused");
+    FOCUSED("focused"),
+    /** Every control with its value and states: what submitting the page now would send. */
+    FORM("form");
 
     private final String wire;
 

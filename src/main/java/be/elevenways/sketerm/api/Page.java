@@ -4,6 +4,7 @@ import be.elevenways.sketerm.json.Json;
 import be.elevenways.sketerm.mcp.Content;
 import be.elevenways.sketerm.mcp.ToolResult;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
@@ -415,6 +416,130 @@ public final class Page {
     }
 
     /**
+     * Evaluate JavaScript and write the WHOLE result to a file instead of into the answer.
+     *
+     * <p>The bytes go from the page to disk without passing through this session, which is what
+     * makes a big scrape cost nothing to read. A string value is written as itself and anything else
+     * as JSON, which {@link EvaluatedFile#format()} states rather than leaves to be guessed.</p>
+     *
+     * @param destination an absolute path on the machine running the server
+     * @throws InvalidArgsException when the destination is not absolute
+     * @throws IoFailedException when the server could not write the file
+     * @throws FailedException when the page threw, carrying the message and stack
+     */
+    public EvaluatedFile evaluateToFile(String code, Path destination) {
+        return this.evaluateToFile(code, destination, false, null);
+    }
+
+    /**
+     * @param awaitPromise resolve a returned promise before writing the file
+     * @param timeout the per-call budget, the server's default when null
+     */
+    public EvaluatedFile evaluateToFile(String code, Path destination, boolean awaitPromise, Duration timeout) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("code", code);
+        arguments.put("out_file", absolute(destination, "out_file", "web_eval"));
+
+        if (awaitPromise) {
+            arguments.put("await", true);
+        }
+
+        ToolCalls.putTimeout(arguments, timeout);
+
+        Map<String, Object> structured = this.calls.structured("web_eval", arguments);
+        this.absorb(structured);
+
+        return EvaluatedFile.decode(structured);
+    }
+
+    /**
+     * Download a url to a file, fetched by THIS view's browser, so its cookies, session and route
+     * carry and a file behind a login needs no token of its own.
+     *
+     * <p>A {@link DownloadState#TIMED_OUT} answer is data, not a failure: the call's budget ran out
+     * while the transfer was still running, and {@link #downloads()} can say later what became of
+     * it.</p>
+     *
+     * @param destination an absolute file path on the machine running the server
+     * @throws InvalidArgsException when the destination is not absolute
+     */
+    public Download download(String url, Path destination) {
+        return this.download(url, destination, null);
+    }
+
+    /**
+     * @param timeout the budget for the whole download, the server's default and ceiling being two
+     *                minutes
+     */
+    public Download download(String url, Path destination, Duration timeout) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("url", url);
+        arguments.put("path", absolute(destination, "path", "web_download"));
+        ToolCalls.putTimeout(arguments, timeout);
+
+        DownloadBatch batch = this.downloaded(arguments);
+
+        if (batch.downloads().size() != 1) {
+            throw new ProtocolMismatchException("web_download answered with "
+                    + batch.downloads().size() + " entries for one url");
+        }
+
+        return batch.downloads().getFirst();
+    }
+
+    /**
+     * Download several urls into one directory, each named from its url's last path segment.
+     *
+     * <p>They are fetched ONE AT A TIME, so the whole batch shares the call's budget: past it the
+     * remaining entries come back {@link DownloadState#NOT_STARTED} and the call can be repeated
+     * with what is left.</p>
+     *
+     * @param directory an absolute directory path on the machine running the server
+     * @throws InvalidArgsException when the directory is not absolute, the list is empty, or it
+     *         holds more than {@link DownloadBatch#MAX_URLS} urls
+     */
+    public DownloadBatch download(List<String> urls, Path directory) {
+        return this.download(urls, directory, null);
+    }
+
+    /**
+     * @param timeout the budget for the whole call, not per file
+     */
+    public DownloadBatch download(List<String> urls, Path directory, Duration timeout) {
+
+        if (urls == null || urls.isEmpty()) {
+            throw new InvalidArgsException("web_download needs at least one url",
+                    "web_download", false, null);
+        }
+
+        if (urls.size() > DownloadBatch.MAX_URLS) {
+            throw new InvalidArgsException("web_download takes at most " + DownloadBatch.MAX_URLS
+                    + " urls per call and was given " + urls.size()
+                    + "; they are fetched one at a time, so split the batch",
+                    "web_download", false, null);
+        }
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("urls", List.copyOf(urls));
+        arguments.put("dir", absolute(directory, "dir", "web_download"));
+        ToolCalls.putTimeout(arguments, timeout);
+
+        return this.downloaded(arguments);
+    }
+
+    /**
+     * Every download this view knows about, including the ones the PAGE started - a save button, a
+     * blob it created - which land in the user's XDG download directory.
+     *
+     * @return the listing, whose {@link DownloadBatch#listing()} is true and whose counts are zero
+     */
+    public DownloadBatch downloads() {
+        return this.downloaded(this.args());
+    }
+
+    /**
      * A PNG of this view.
      */
     public Screenshot screenshot() {
@@ -823,6 +948,28 @@ public final class Page {
         this.absorb(structured);
 
         return ScrollResult.decode(structured);
+    }
+
+    private DownloadBatch downloaded(Map<String, Object> arguments) {
+
+        Map<String, Object> structured = this.calls.structured("web_download", arguments);
+        this.absorb(structured);
+
+        return DownloadBatch.decode(structured);
+    }
+
+    /**
+     * AIDEV-NOTE: the server refuses a relative path itself; refusing it here keeps a doomed call
+     * from going out, the same rule ProfileNames applies to a profile name.
+     */
+    private static String absolute(Path path, String argument, String tool) {
+
+        if (path == null || !path.isAbsolute()) {
+            throw new InvalidArgsException("'" + argument + "' must be an absolute path on the"
+                    + " machine running the server, not " + path, tool, false, null);
+        }
+
+        return path.toString();
     }
 
     private ExpandedText expandId(int id, Integer offset, Integer length) {

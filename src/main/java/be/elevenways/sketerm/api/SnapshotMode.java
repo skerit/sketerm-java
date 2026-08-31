@@ -9,7 +9,9 @@ public enum SnapshotMode implements WireValue {
     AUTO("auto"),
     FULL("full"),
     /** The per-revision replay, for debugging a page that changes on its own. */
-    HISTORY("history");
+    HISTORY("history"),
+    /** A revision-only poll that consumes nothing, so the next delta is still owed in full. */
+    PEEK("peek");
 
     private final String wire;
 
