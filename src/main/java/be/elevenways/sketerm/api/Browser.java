@@ -40,6 +40,9 @@ public final class Browser {
      *         capability - NOTHING is opened, there is deliberately no unpoliced fallback
      * @throws ConflictException when the helper cannot hold another policy (its table is full);
      *         the view is closed again un-navigated
+     * @throws UnavailableException when a captured open meets a helper without the capture
+     *         capability, or a GUI - NOTHING is opened, there is deliberately no uncaptured fallback
+     * @throws InvalidArgsException when the server refuses the capture filter (a bad url_regex)
      * @throws UnavailableException when the server returned a handle that is no longer an open view
      */
     public Page openPage(String url, OpenOptions options) {
@@ -62,6 +65,10 @@ public final class Browser {
 
             if (options.policy() != null) {
                 arguments.put("policy", options.policy().toWire());
+            }
+
+            if (options.capture() != null) {
+                arguments.put("capture", options.capture().toWire());
             }
         }
 
@@ -234,6 +241,19 @@ public final class Browser {
      */
     public boolean supportsDownloads() {
         return this.capability("web_downloads");
+    }
+
+    /**
+     * Preflight: whether this server can capture the response bodies a view's page receives.
+     *
+     * <p>Worth asking before offering the feature, since a captured open is fail-closed: without the
+     * capability NOTHING is opened.</p>
+     *
+     * @return the capabilities report's web_capture flag, false when the server names none (or a
+     *         GUI is attached: capture is headless only)
+     */
+    public boolean supportsCapture() {
+        return this.capability("web_capture");
     }
 
     private boolean capability(String fact) {

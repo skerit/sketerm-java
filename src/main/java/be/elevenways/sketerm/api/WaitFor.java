@@ -12,7 +12,12 @@ public enum WaitFor implements WireValue {
     /** The argument appears in the page's semantic tree. */
     TEXT("text", true),
     /** The DOM stopped changing for 600ms. */
-    IDLE("idle", false);
+    IDLE("idle", false),
+    /**
+     * A CAPTURED exchange finished; {@link Page#waitForResponse} is the typed way to ask, with the
+     * filter and cursor this condition needs.
+     */
+    RESPONSE("response", false);
 
     private final String wire;
     private final boolean acceptsArgument;

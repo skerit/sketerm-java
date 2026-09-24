@@ -106,7 +106,7 @@ mutating call must not be retried blindly.
 The tool schemas own the vocabularies; the enums mirror them one for one and carry their wire token
 (`Action`, `NavigateAction`, `WaitFor`, `ScrollTo`, `SnapshotMode`, `QueryKind`, `NetworkAction`,
 `ErrorCode`, `ProfileKind`, `ResourceType`, `UrlScheme`, `PolicySource`, `DenialReason`,
-`DownloadState`, `EvalFormat`). An unknown
+`DownloadState`, `EvalFormat`, `CaptureState`, `CaptureTruncation`, `BodyEncoding`, `BodyPart`). An unknown
 token fails closed rather than being folded into a neighbour.
 
 Failures are typed off `structuredContent.error.code` by one switch in `SketermApiException.from`:
@@ -262,6 +262,63 @@ The rules the wire contract insists on, mirrored here:
   call goes out;
 - `supportsDownloads()` reads the `capabilities` report's `web_downloads` flag, the preflight before
   offering the feature at all.
+
+### Response-body capture
+
+A headless view can record the RESPONSES its page receives - the JSON a single-page app fetches
+from its own API, exactly as the page got it (decompressed), with the request body and the
+response headers - instead of scraping a virtualized DOM or calling a private API yourself:
+
+```java
+if (browser.supportsCapture()) {
+
+    CaptureFilter filter = CaptureFilter.builder()
+            .hosts("spotify.com")
+            .urlContains("/pathfinder/")
+            .methods("POST", "GET")
+            .mimePrefixes("application/json")
+            .maxBodyBytes(8L * 1024 * 1024)
+            .build();
+
+    Page page = browser.openPage("https://open.spotify.com/playlist/...", OpenOptions.withCapture(filter));
+
+    // Mark BEFORE acting, then wait from the mark: a response that finishes in between still counts
+    long mark = page.captureMark();
+    page.scrollTo(ScrollTo.BOTTOM);
+    WaitedResponse next = page.waitForResponse(filter, mark, Duration.ofSeconds(20));
+
+    CapturedBody json = page.responseBody(next.exchange().seq());
+    CapturedBody query = page.requestBody(next.exchange().seq());      // the GraphQL POST body
+    page.responseBodyToFile(next.exchange().seq(), Path.of("/tmp/page-2.json"));
+
+    for (CapturedExchange exchange : page.captured(0, 100).exchanges()) {
+        System.out.println(exchange.seq() + " " + exchange.status() + " " + exchange.url());
+    }
+
+    page.clearCaptured(next.nextSince());   // free what has been read
+}
+```
+
+The rules the wire contract insists on, mirrored here:
+
+- capture is HEADLESS ONLY, installed at OPEN and never added to a live view, so it is live
+  before the page's first request and survives SPA route changes and full navigations;
+- the refusal is FAIL CLOSED: a helper without the capture capability answers `unavailable` and
+  NOTHING is opened, never a view that silently records nothing;
+- every clause of a `CaptureFilter` must hold, an omitted one does not restrict, and nothing that
+  fails one is ever buffered. `ResourceType.XHR` (the default) covers fetch() and XMLHttpRequest
+  alike, because the engine reports them as one class;
+- nothing is cut silently: a body past `maxBodyBytes` is kept up to it and flagged with the size
+  the page received (`CaptureTruncation`), exchanges the total cap could not hold are counted in
+  `CapturedExchanges.dropped()`, and an inline answer carrying a prefix says `inlineTruncated()`;
+- `seq` is the request's `web_network` seq (the join key with `page.network()`), while the list
+  CURSOR follows the order exchanges finished: responses finish out of request order, and paging
+  by seq would skip a slow one;
+- a body the page never reads keeps its load open in the engine, so that exchange stays in flight
+  (`capturedWithInFlight` lists it, and its bytes are readable) until the page reads it or leaves;
+- a live capture can only be NARROWED: `clearCaptured` frees what was read, `disableCapture` stops
+  recording, and a wider capture needs a new view;
+- `supportsCapture()` reads the `capabilities` report's `web_capture` flag.
 
 ### Evidence capture
 

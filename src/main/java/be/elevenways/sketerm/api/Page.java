@@ -37,6 +37,7 @@ public final class Page {
     private int policySerial;
     private boolean policyExhausted;
     private DenialReason policyExhaustedReason;
+    private boolean captureActive;
     private boolean openingSettled;
     private String openingSnapshotError;
     private boolean closed;
@@ -228,6 +229,14 @@ public final class Page {
         this.absorb(structured);
 
         return PolicyUpdate.decode(structured);
+    }
+
+    /**
+     * @return whether this view records response bodies, as of the last answer that said
+     *         (web_open, web_tabs and the capture calls do); false after {@link #disableCapture()}
+     */
+    public boolean isCaptureActive() {
+        return this.captureActive;
     }
 
     /**
@@ -537,6 +546,164 @@ public final class Page {
      */
     public DownloadBatch downloads() {
         return this.downloaded(this.args());
+    }
+
+    /**
+     * The first page of this view's captured exchanges, as metadata.
+     *
+     * @throws ConflictException when this view was opened without a capture
+     * @throws UnavailableException with a GUI attached: capture is a headless-only feature
+     */
+    public CapturedExchanges captured() {
+        return this.captured(0, null);
+    }
+
+    /**
+     * One page of this view's FINISHED exchanges, oldest cursor first.
+     *
+     * <p>The cursor follows the order exchanges FINISHED, not their request order - responses
+     * finish out of order, and paging by request seq would skip a slow one. Each exchange still
+     * carries its request's {@code seq}, the join key with {@link #network()}.</p>
+     *
+     * @param since only exchanges past this cursor; a previous page's {@link CapturedExchanges#nextSince()}
+     * @param max at most this many, the server's 50 when null (cap 500)
+     */
+    public CapturedExchanges captured(long since, Integer max) {
+        return this.listCaptured(since, max, false, null);
+    }
+
+    /**
+     * As {@link #captured(long, Integer)}, followed by the exchanges still IN FLIGHT (cursor 0).
+     *
+     * <p>A body the page never reads keeps its load open in the engine, so such an exchange stays in
+     * flight until the page reads it or navigates away; its bytes are readable meanwhile.</p>
+     */
+    public CapturedExchanges capturedWithInFlight(long since, Integer max) {
+        return this.listCaptured(since, max, true, null);
+    }
+
+    /**
+     * List a page of exchanges AND write each one's response body into a directory, named
+     * {@code <seq>.<ext>}, each exchange then carrying its {@link CapturedExchange#path()} and
+     * digest. The bodies never pass through this session.
+     *
+     * @param directory an absolute directory on the machine running the server
+     */
+    public CapturedExchanges capturedToDirectory(Path directory, long since, Integer max) {
+        return this.listCaptured(since, max, false, absolute(directory, "out_dir", "web_capture"));
+    }
+
+    /**
+     * The newest capture cursor so far. Read it BEFORE an action (a scroll) and wait from it with
+     * {@link #waitForResponse(CaptureFilter, long, Duration)}, so a response that finishes before
+     * the wait starts still counts.
+     */
+    public long captureMark() {
+        return this.listCaptured(0xFFFF_FFFFL, 1, false, null).headCursor();
+    }
+
+    /**
+     * One exchange's response body, inline: text as UTF-8, a binary as base64.
+     *
+     * @param seq the exchange's {@link CapturedExchange#seq()}
+     * @throws NotFoundException when no held exchange has that seq (never captured, or cleared)
+     */
+    public CapturedBody responseBody(long seq) {
+        return this.body(seq, BodyPart.RESPONSE, null);
+    }
+
+    /**
+     * @param maxInlineBytes the most body text (or base64) the answer carries, the server's 64 KiB
+     *                       when null (at most 1 MiB); a longer body arrives as a flagged prefix
+     */
+    public CapturedBody responseBody(long seq, Integer maxInlineBytes) {
+        return this.body(seq, BodyPart.RESPONSE, maxInlineBytes);
+    }
+
+    /**
+     * One exchange's REQUEST body - what the page sent, e.g. a GraphQL POST's operation and
+     * variables.
+     */
+    public CapturedBody requestBody(long seq) {
+        return this.body(seq, BodyPart.REQUEST, null);
+    }
+
+    /**
+     * Write one exchange's whole response body to a file, the way many MB of JSON should travel:
+     * straight to disk, reported by identity only.
+     *
+     * @param destination an absolute path on the machine running the server
+     */
+    public CapturedBodyFile responseBodyToFile(long seq, Path destination) {
+        return this.bodyToFile(seq, BodyPart.RESPONSE, destination);
+    }
+
+    public CapturedBodyFile bodyToFile(long seq, BodyPart part, Path destination) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("seq", seq);
+        arguments.put("part", part.wire());
+        arguments.put("out_file", absolute(destination, "out_file", "web_capture"));
+
+        Map<String, Object> structured = this.calls.structured("web_capture", arguments);
+        this.absorb(structured);
+
+        return CapturedBodyFile.decode(structured);
+    }
+
+    /**
+     * Wait for the next captured response matching {@code filter} that finishes after THIS call
+     * starts.
+     *
+     * <p>Racy after an action: a response can finish between the action and this call. For scroll
+     * then wait, take {@link #captureMark()} first and use
+     * {@link #waitForResponse(CaptureFilter, long, Duration)}.</p>
+     *
+     * @param filter the clauses a response must match; its byte caps are ignored, and empty types
+     *               mean ANY class here; null matches every captured exchange
+     * @throws TimeoutException when no such response finished inside the budget
+     * @throws ConflictException when this view was opened without a capture
+     */
+    public WaitedResponse waitForResponse(CaptureFilter filter, Duration timeout) {
+        return this.awaitResponse(filter, null, null, timeout);
+    }
+
+    /**
+     * Wait for a captured response matching {@code filter} that finished after cursor
+     * {@code since} - from {@link #captureMark()}, or a previous {@link WaitedResponse#nextSince()}.
+     */
+    public WaitedResponse waitForResponse(CaptureFilter filter, long since, Duration timeout) {
+        return this.awaitResponse(filter, since, null, timeout);
+    }
+
+    /**
+     * Wait for a captured response matching {@code filter} whose REQUEST came after network-log seq
+     * {@code afterSeq}; one that already finished counts too.
+     */
+    public WaitedResponse waitForResponseAfterSeq(CaptureFilter filter, long afterSeq, Duration timeout) {
+        return this.awaitResponse(filter, null, afterSeq, timeout);
+    }
+
+    /**
+     * Free every captured exchange, in-flight ones included, giving their bytes back to the cap.
+     */
+    public CaptureChange clearCaptured() {
+        return this.narrowCapture("clear", null);
+    }
+
+    /**
+     * Free the finished exchanges up to a cursor - the ones already read.
+     */
+    public CaptureChange clearCaptured(long upto) {
+        return this.narrowCapture("clear", upto);
+    }
+
+    /**
+     * Stop recording new exchanges; what is held stays readable. A capture can only ever be
+     * narrowed, never widened or re-enabled: that needs a new view.
+     */
+    public CaptureChange disableCapture() {
+        return this.narrowCapture("disable", null);
     }
 
     /**
@@ -863,6 +1030,17 @@ public final class Page {
 
         this.absorbPolicy(structured);
 
+        // web_open and web_tabs report capture_active, the capture calls report capture_state.
+        if (structured.containsKey("capture_active")) {
+            this.captureActive = Json.optBool(structured, "capture_active", false);
+        }
+
+        String captureState = Json.optStr(structured, "capture_state");
+
+        if (captureState != null) {
+            this.captureActive = CaptureState.require(captureState) == CaptureState.ACTIVE;
+        }
+
         Long document = Json.optLong(structured, "document");
         Long revision = Json.optLong(structured, "revision");
 
@@ -948,6 +1126,80 @@ public final class Page {
         this.absorb(structured);
 
         return ScrollResult.decode(structured);
+    }
+
+    private CapturedExchanges listCaptured(long since, Integer max, boolean inFlight, String outDir) {
+
+        Map<String, Object> arguments = this.args();
+
+        if (since != 0) {
+            arguments.put("since", since);
+        }
+
+        ToolCalls.put(arguments, "max", max);
+
+        if (inFlight) {
+            arguments.put("include_in_flight", true);
+        }
+
+        ToolCalls.put(arguments, "out_dir", outDir);
+
+        Map<String, Object> structured = this.calls.structured("web_capture", arguments);
+        this.absorb(structured);
+
+        return CapturedExchanges.decode(structured);
+    }
+
+    private CapturedBody body(long seq, BodyPart part, Integer maxInlineBytes) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("seq", seq);
+        arguments.put("part", part.wire());
+        ToolCalls.put(arguments, "max_bytes", maxInlineBytes);
+
+        Map<String, Object> structured = this.calls.structured("web_capture", arguments);
+        this.absorb(structured);
+
+        return CapturedBody.decode(structured);
+    }
+
+    private WaitedResponse awaitResponse(CaptureFilter filter, Long since, Long afterSeq, Duration timeout) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("for", WaitFor.RESPONSE.wire());
+
+        if (filter != null) {
+
+            Map<String, Object> match = filter.toMatchWire();
+
+            if (!match.isEmpty()) {
+                arguments.put("response", match);
+            }
+        }
+
+        ToolCalls.put(arguments, "since", since);
+        ToolCalls.put(arguments, "after_seq", afterSeq);
+        ToolCalls.putTimeout(arguments, timeout);
+
+        Map<String, Object> structured = this.calls.structured("web_wait", arguments);
+        this.absorb(structured);
+
+        return WaitedResponse.decode(structured);
+    }
+
+    private CaptureChange narrowCapture(String action, Long upto) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("action", action);
+        ToolCalls.put(arguments, "upto", upto);
+
+        Map<String, Object> structured = this.calls.structured("web_capture_set", arguments);
+        this.absorb(structured);
+
+        CaptureChange change = CaptureChange.decode(structured);
+        this.captureActive = change.state() == CaptureState.ACTIVE;
+
+        return change;
     }
 
     private DownloadBatch downloaded(Map<String, Object> arguments) {

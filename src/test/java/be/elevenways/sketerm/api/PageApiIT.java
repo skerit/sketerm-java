@@ -384,6 +384,144 @@ class PageApiIT {
         }
     }
 
+    @Test
+    @DisplayName("A captured view keeps the JSON its page fetched, POST bodies included, and waits for the next one")
+    void captureJourney(@TempDir Path out) throws IOException {
+
+        assumeTrue(server != null, "the sketerm binary is not built in the sibling checkout");
+        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+
+        try (Sketerm sketerm = Sketerm.launch(options("capture").build())) {
+
+            List<String> tools = sketerm.session().listTools().stream()
+                    .map(descriptor -> descriptor.name())
+                    .toList();
+
+            assumeTrue(tools.contains("web_capture") && tools.contains("web_capture_set"),
+                    "the copied sketerm predates response-body capture (rebuild the sibling"
+                            + " checkout: zig build && zig build web)");
+
+            Browser browser = sketerm.browser();
+            assertTrue(browser.supportsCapture(), "step 31: the headless server advertises capture");
+
+            CaptureFixture fixture = CaptureFixture.start();
+
+            try {
+                CaptureFilter filter = CaptureFilter.builder()
+                        .urlContains("/api/")
+                        .mimePrefixes("application/json")
+                        .build();
+
+                // 32. The capture is live from the first request: the page's own startup fetches
+                Page page = browser.openPage(fixture.url("/page"), OpenOptions.withCapture(filter));
+                assertTrue(page.isCaptureActive(), "step 32: the view records");
+
+                WaitedResponse gql = page.waitForResponse(CaptureFilter.builder()
+                        .urlContains("/api/gql").methods("POST").build(), 0, Duration.ofSeconds(30));
+                assertEquals("POST", gql.exchange().method(), "step 32: the page's POST finished");
+
+                // 33. Bodies exactly as the page sent and received them
+                assertEquals(CaptureFixture.GQL, page.responseBody(gql.exchange().seq()).text(),
+                        "step 33: the response body");
+                assertEquals(CaptureFixture.GQL_REQUEST, page.requestBody(gql.exchange().seq()).text(),
+                        "step 33: and the request body");
+
+                // 34. The listing joins the network log by seq
+                CapturedExchanges listed = page.captured();
+                assertEquals(2, listed.exchanges().size(), "step 34: the two JSON fetches, nothing else");
+
+                List<NetworkLog.NetworkRequest> requests = page.networkRequests();
+
+                for (CapturedExchange exchange : listed.exchanges()) {
+                    assertTrue(requests.stream().anyMatch(request -> request.seq() == exchange.seq()
+                                    && request.url().equals(exchange.url())),
+                            "step 34: exchange " + exchange.seq() + " is its web_network row");
+                }
+
+                // 35. A whole body straight to disk
+                CapturedExchange first = listed.exchanges().stream()
+                        .filter(exchange -> exchange.url().endsWith("/api/first"))
+                        .findFirst()
+                        .orElseThrow();
+                CapturedBodyFile file = page.responseBodyToFile(first.seq(), out.resolve("first.json"));
+                assertEquals(CaptureFixture.FIRST, Files.readString(file.path()), "step 35: the file holds the body");
+
+                // 36. Mark, act, then wait: the response that follows the action is the one returned
+                long mark = page.captureMark();
+                page.evaluate("setTimeout(() => fetch('/api/later').then(r => r.text()), 500), 1");
+                WaitedResponse later = page.waitForResponse(CaptureFilter.builder().urlContains("/api/later").build(),
+                        mark, Duration.ofSeconds(20));
+                assertTrue(later.exchange().url().endsWith("/api/later"), "step 36: the later fetch was waited for");
+                assertEquals(CaptureFixture.LATER, page.responseBody(later.exchange().seq()).text(),
+                        "step 36: with its body");
+
+                // 37. Narrowing only
+                CaptureChange cleared = page.clearCaptured();
+                assertEquals(0, cleared.storedBytes(), "step 37: clearing gives every byte back");
+                assertEquals(CaptureState.DISABLED, page.disableCapture().state(), "step 37: disabled");
+                assertFalse(page.isCaptureActive(), "step 37: and the page knows");
+
+                page.close();
+            } finally {
+                fixture.stop();
+            }
+        }
+    }
+
+    /**
+     * A loopback origin whose page fetches JSON, including a POST whose body the capture must keep.
+     */
+    private record CaptureFixture(HttpServer http) {
+
+        static final String FIRST = "{\"items\":[\"one\",\"two\"],\"next\":25}";
+        static final String GQL = "{\"data\":{\"playlist\":{\"tracks\":[\"A\",\"B\"]}}}";
+        static final String GQL_REQUEST = "{\"operationName\":\"fetchPlaylist\",\"variables\":{\"offset\":25}}";
+        static final String LATER = "{\"items\":[\"three\"],\"next\":null}";
+
+        static CaptureFixture start() throws IOException {
+
+            HttpServer http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+
+            http.createContext("/page", exchange -> respond(exchange, "text/html",
+                    "<html><head><title>Capture IT</title></head><body><script>"
+                            + "fetch('/api/first').then(r => r.text()).then(() => fetch('/api/gql', {"
+                            + "method: 'POST', headers: {'content-type': 'application/json'},"
+                            + "body: JSON.stringify({operationName: 'fetchPlaylist', variables: {offset: 25}})}))"
+                            + ".then(r => r.text()).then(() => fetch('/other.css')).then(r => r.text());"
+                            + "</script></body></html>"));
+            http.createContext("/api/first", exchange -> respond(exchange, "application/json", FIRST));
+            http.createContext("/api/gql", exchange -> {
+                exchange.getRequestBody().readAllBytes();
+                respond(exchange, "application/json", GQL);
+            });
+            http.createContext("/api/later", exchange -> respond(exchange, "application/json", LATER));
+            http.createContext("/other.css", exchange -> respond(exchange, "text/css", "body{}"));
+            http.start();
+
+            return new CaptureFixture(http);
+        }
+
+        String url(String path) {
+            return "http://127.0.0.1:" + this.http.getAddress().getPort() + path;
+        }
+
+        void stop() {
+            this.http.stop(0);
+        }
+
+        private static void respond(HttpExchange exchange, String type, String body) throws IOException {
+
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+
+            exchange.getResponseHeaders().add("Content-Type", type + "; charset=utf-8");
+            exchange.sendResponseHeaders(200, bytes.length);
+
+            try (var stream = exchange.getResponseBody()) {
+                stream.write(bytes);
+            }
+        }
+    }
+
     /**
      * A loopback origin whose page pulls same-host subresources plus one that is OFFSITE by host
      * string only ("localhost" against an allow-list of "127.0.0.1").

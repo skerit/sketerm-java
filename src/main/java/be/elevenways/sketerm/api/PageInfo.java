@@ -16,6 +16,7 @@ import java.util.Map;
  * @param policyActive whether an enforced network policy is installed on this view
  * @param policyExhausted whether a policy budget has LATCHED for this view; permanent per view
  * @param policyExhaustedReason which budget it was, null while none has latched
+ * @param captureActive whether this view records response bodies (headless only)
  */
 public record PageInfo(int handle,
                        String url,
@@ -31,7 +32,8 @@ public record PageInfo(int handle,
                        boolean current,
                        boolean policyActive,
                        boolean policyExhausted,
-                       DenialReason policyExhaustedReason) {
+                       DenialReason policyExhaustedReason,
+                       boolean captureActive) {
 
     static PageInfo decode(Map<String, Object> entry) {
 
@@ -53,7 +55,8 @@ public record PageInfo(int handle,
                 Json.optBool(entry, "current", false),
                 Json.optBool(entry, "policy_active", false),
                 exhausted,
-                exhausted ? DenialReason.requireExhaustion(Json.optStr(entry, "policy_exhausted_reason")) : null);
+                exhausted ? DenialReason.requireExhaustion(Json.optStr(entry, "policy_exhausted_reason")) : null,
+                Json.optBool(entry, "capture_active", false));
     }
 
     /**
@@ -78,6 +81,7 @@ public record PageInfo(int handle,
         }
 
         facts.put("policy_active", this.policyActive);
+        facts.put("capture_active", this.captureActive);
 
         if (this.policyExhausted) {
             facts.put("policy_exhausted", true);
