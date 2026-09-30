@@ -3,20 +3,6 @@ plugins {
     id 'maven-publish'
 }
 
-group = 'be.elevenways'
-version = '0.1.0-SNAPSHOT'
-
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
-    }
-}
-
-repositories {
-    mavenLocal()
-    mavenCentral()
-}
-
 configurations {
     loaderStub
     runtimeClasspath.extendsFrom(loaderStub)
