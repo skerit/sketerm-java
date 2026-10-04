@@ -33,6 +33,8 @@ public final class Page {
     private ProfileKind profileKind;
     private int context;
     private boolean policyActive;
+    private boolean requiresUntrusted;
+    private boolean untrustedAcknowledged;
     private PolicySource policySource;
     private int policySerial;
     private boolean policyExhausted;
@@ -153,9 +155,10 @@ public final class Page {
     /**
      * @return whether an enforced network policy is installed on this view, as of the last answer
      *         that reported it (web_open and {@link #policy()} do; nothing else does)
+     *         Untrusted views additionally require the correlated enforcement attestation.
      */
     public boolean isPolicyActive() {
-        return this.policyActive;
+        return this.policyActive && (!this.requiresUntrusted || this.untrustedAcknowledged);
     }
 
     /**
@@ -203,9 +206,10 @@ public final class Page {
     public PolicyStatus policy() {
 
         Map<String, Object> structured = this.calls.structured("web_policy", this.args());
+        PolicyStatus status = PolicyStatus.decode(structured);
         this.absorb(structured);
-
-        return PolicyStatus.decode(structured);
+        if (this.requiresUntrusted) this.untrustedAcknowledged = status.untrusted();
+        return status;
     }
 
     /**
@@ -222,6 +226,10 @@ public final class Page {
      */
     public PolicyUpdate tightenPolicy(NetworkPolicy policy) {
 
+        if (policy.untrusted() != null) {
+            throw new InvalidArgsException("Untrusted mode cannot be set on a live view, in either direction",
+                    "web_policy_set", false, null);
+        }
         Map<String, Object> arguments = this.args();
         arguments.put("policy", policy.toWire());
 
@@ -1062,6 +1070,14 @@ public final class Page {
      */
     private void absorbPolicy(Map<String, Object> structured) {
 
+        Map<String, Object> policy = Json.optMap(structured, "policy");
+        if (Boolean.TRUE.equals(structured.get("untrusted"))
+                || (policy != null && Boolean.TRUE.equals(policy.get("untrusted")))) {
+            this.requiresUntrusted = true;
+        }
+        if (structured.containsKey("enforced")) {
+            this.untrustedAcknowledged = PolicyStatus.verifiedUntrusted(structured);
+        }
         if (structured.containsKey("policy_active")) {
             this.policyActive = Json.optBool(structured, "policy_active", false);
         }
@@ -1070,7 +1086,9 @@ public final class Page {
 
         if (source != null) {
             this.policySource = source;
-            this.policyActive = this.policyActive || source != PolicySource.NONE;
+            if (!structured.containsKey("policy_active")) {
+                this.policyActive = this.policyActive || source != PolicySource.NONE;
+            }
         }
 
         Long serial = Json.optLong(structured, "policy_serial");

@@ -25,6 +25,7 @@ import java.util.Map;
  * @param exhaustedReason which budget it was, {@link DenialReason#NONE} while none has
  * @param denied refusals by reason since the policy was installed, absent reasons meaning zero
  * @param durable always false: policies and profile defaults live for the server's lifetime only
+ * @param untrusted verified restricted enforcement from the correlated web_policy answer, not a requested mode
  */
 public record PolicyStatus(boolean active,
                            PolicySource source,
@@ -37,7 +38,28 @@ public record PolicyStatus(boolean active,
                            boolean exhausted,
                            DenialReason exhaustedReason,
                            Map<DenialReason, Long> denied,
-                           boolean durable) {
+                           boolean durable,
+                           boolean untrusted) {
+
+    /** Backward-compatible constructor; ordinary status carries no untrusted attestation. */
+    public PolicyStatus(boolean active, PolicySource source, int serial, NetworkPolicy policy,
+                        long requests, long bytes, long navigations, long msLeft, boolean exhausted,
+                        DenialReason exhaustedReason, Map<DenialReason, Long> denied, boolean durable) {
+        this(active, source, serial, policy, requests, bytes, navigations, msLeft, exhausted,
+                exhaustedReason, denied, durable, false);
+    }
+
+    /** The server emits these enforcement facts only for a verified untrusted view. */
+    static boolean verifiedUntrusted(Map<String, Object> structured) {
+        Map<String, Object> policy = Json.optMap(structured, "policy");
+        Map<String, Object> enforced = Json.optMap(structured, "enforced");
+        return Boolean.TRUE.equals(structured.get("policy_active"))
+                && policy != null && Boolean.TRUE.equals(policy.get("untrusted"))
+                && enforced != null && "denied".equals(enforced.get("internet_sockets"))
+                && "actual-address-validated".equals(enforced.get("http_broker"))
+                && Boolean.FALSE.equals(enforced.get("websockets"))
+                && Boolean.FALSE.equals(enforced.get("webrtc"));
+    }
 
     static PolicyStatus decode(Map<String, Object> structured) {
 
@@ -47,10 +69,11 @@ public record PolicyStatus(boolean active,
         if (raw != null) {
             for (Map.Entry<String, Object> entry : raw.entrySet()) {
 
+                DenialReason denial = DenialReason.require(entry.getKey());
                 Long count = Json.optLong(raw, entry.getKey());
 
                 if (count != null && count != 0) {
-                    denied.put(DenialReason.require(entry.getKey()), count);
+                    denied.put(denial, count);
                 }
             }
         }
@@ -58,10 +81,15 @@ public record PolicyStatus(boolean active,
         DenialReason reason = DenialReason.requireExhaustion(
                 Json.optStr(structured, "exhausted_reason"));
 
-        return new PolicyStatus(Json.optBool(structured, "policy_active", false),
+        NetworkPolicy policy = NetworkPolicy.decode(structured);
+        boolean untrusted = verifiedUntrusted(structured);
+        boolean requiresUntrusted = Boolean.TRUE.equals(structured.get("untrusted"))
+                || (policy != null && policy.requiresUntrusted());
+        return new PolicyStatus(Json.optBool(structured, "policy_active", false)
+                        && (!requiresUntrusted || untrusted),
                 PolicySource.fromWire(Json.optStr(structured, "policy_source")),
                 zero(Json.optLong(structured, "policy_serial")).intValue(),
-                NetworkPolicy.decode(structured),
+                policy,
                 zero(Json.optLong(structured, "requests")),
                 zero(Json.optLong(structured, "bytes")),
                 zero(Json.optLong(structured, "navigations")),
@@ -69,7 +97,8 @@ public record PolicyStatus(boolean active,
                 Json.optBool(structured, "exhausted", false),
                 reason == null ? DenialReason.NONE : reason,
                 Collections.unmodifiableMap(denied),
-                Json.optBool(structured, "durable", false));
+                Json.optBool(structured, "durable", false),
+                untrusted);
     }
 
     /**

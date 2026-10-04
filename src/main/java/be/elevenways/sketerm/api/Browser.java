@@ -47,6 +47,11 @@ public final class Browser {
      */
     public Page openPage(String url, OpenOptions options) {
 
+        boolean untrusted = options != null && options.policy() != null && options.policy().requiresUntrusted();
+        if (untrusted && !this.supportsUntrusted()) {
+            throw new UnavailableException("Sketerm does not advertise web_untrusted; nothing was opened",
+                    "web_open", false, null);
+        }
         Map<String, Object> arguments = ToolCalls.args();
         ToolCalls.put(arguments, "url", url);
 
@@ -54,6 +59,9 @@ public final class Browser {
             ToolCalls.put(arguments, "width", options.width());
             ToolCalls.put(arguments, "height", options.height());
             ToolCalls.putTimeout(arguments, options.timeout());
+            ToolCalls.put(arguments, "route", options.route());
+            ToolCalls.put(arguments, "color_scheme", options.colorScheme() == null ? null : options.colorScheme().wire());
+            if (untrusted) arguments.put("route", "direct");
 
             if (options.profile() != null) {
                 arguments.put("profile", ProfileNames.require(options.profile(), "web_open"));
@@ -76,6 +84,19 @@ public final class Browser {
         int handle = Handles.of(structured, "web_open");
 
         try {
+            if (options != null && options.colorScheme() != null
+                    && !options.colorScheme().wire().equals(Json.optStr(structured, "color_scheme"))) {
+                throw new ProtocolMismatchException("web_open did not acknowledge color_scheme: "
+                        + options.colorScheme().wire());
+            }
+            if (untrusted) {
+                NetworkPolicy installed = NetworkPolicy.decode(structured);
+                if (!Boolean.TRUE.equals(structured.get("untrusted"))
+                        || !Boolean.TRUE.equals(structured.get("policy_active"))
+                        || installed == null || !installed.requiresUntrusted()) {
+                    throw new ProtocolMismatchException("web_open did not acknowledge an active untrusted install");
+                }
+            }
             Snapshot opening = structured.containsKey("snapshot")
                     ? Snapshot.decode(handle, structured, "web_open") : null;
             Map<String, Object> pageFacts = structured;
@@ -94,7 +115,11 @@ public final class Browser {
                 pageFacts.putAll(live.toFacts());
             }
 
-            return new Page(this.calls, handle, pageFacts, opening);
+            Page page = new Page(this.calls, handle, pageFacts, opening);
+            if (untrusted && !page.policy().untrusted()) {
+                throw new ProtocolMismatchException("web_policy did not confirm the acknowledged untrusted policy");
+            }
+            return page;
         } catch (RuntimeException failure) {
             // A successful web_open already minted this handle. Never turn a decode disagreement
             // into a view the caller cannot address or close.
@@ -199,6 +224,10 @@ public final class Browser {
      */
     public ProfilePolicy setProfilePolicy(String name, NetworkPolicy policy) {
 
+        if (policy.requiresUntrusted()) {
+            throw new InvalidArgsException("Untrusted policies cannot be named-profile defaults",
+                    "web_policy_set", false, null);
+        }
         Map<String, Object> arguments = ToolCalls.args();
         arguments.put("profile", ProfileNames.require(name, "web_policy_set"));
         arguments.put("policy", policy.toWire());
@@ -256,8 +285,26 @@ public final class Browser {
         return this.capability("web_capture");
     }
 
+    /** Build/platform support for Linux headless untrusted loading; absent means unsupported. */
+    public boolean supportsUntrusted() {
+        return this.capability("web_untrusted");
+    }
+
+    /**
+     * Current helper's verified installation-acknowledgement support. False also means unknown:
+     * web_policy_ack is null before the first helper handshake. An untrusted open verifies it itself.
+     */
+    public boolean supportsPolicyAcknowledgement() {
+        return this.capability("web_policy_ack");
+    }
+
     private boolean capability(String fact) {
-        return Json.optBool(this.calls.structured("capabilities", ToolCalls.args()), fact, false);
+        Object value = this.calls.structured("capabilities", ToolCalls.args()).get(fact);
+        if (value == null) return false;
+        if (!(value instanceof Boolean supported)) {
+            throw new ProtocolMismatchException("capabilities." + fact + " must be boolean or null");
+        }
+        return supported;
     }
 
     static List<PageInfo> listPages(ToolCalls calls) {

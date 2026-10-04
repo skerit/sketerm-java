@@ -45,10 +45,12 @@ class PolicyApiTest {
 
     private static final List<String> SCHEMA_REASONS = List.of("none", "filter_list", "top_host",
             "sub_host", "resource_type", "private_address", "scheme", "redirect_host",
-            "request_cap", "byte_cap", "nav_cap", "deadline");
+            "request_cap", "byte_cap", "nav_cap", "deadline", "resolved_private_address",
+            "untrusted_http", "untrusted_transport", "untrusted_broker", "policy_refused",
+            "url_too_long", "malformed_url", "untrusted_timeout", "untrusted_queue_full");
 
     private static final List<String> SCHEMA_EXHAUSTED_REASONS = List.of("none", "request_cap",
-            "byte_cap", "nav_cap", "deadline");
+            "byte_cap", "nav_cap", "deadline", "policy_refused");
 
     private static final List<String> SCHEMA_POLICY_SOURCES = List.of("call", "profile_default",
             "none");
@@ -62,7 +64,7 @@ class PolicyApiTest {
         assertEquals(SCHEMA_ALLOW_SCHEMES, wires(UrlScheme.values()),
                 "policy.allow_schemes is a 7-name enum and UrlScheme mirrors it in order");
         assertEquals(SCHEMA_REASONS, wires(DenialReason.values()),
-                "web_network's per-request reason is a 12-name enum and DenialReason mirrors it");
+                "web_network's per-request reason enum and DenialReason mirror each other");
         assertEquals(SCHEMA_POLICY_SOURCES, wires(PolicySource.values()),
                 "policy_source is a 3-name enum and PolicySource mirrors it");
 
@@ -154,7 +156,7 @@ class PolicyApiTest {
     @DisplayName("A host entry the server would refuse is refused here, before anything is sent")
     void validatesHostEntries() {
 
-        for (String bad : List.of("*", "site.example:8080", "https://site.example",
+        for (String bad : List.of("*", "site.example:0", "https://site.example",
                 "site.example/path", "", "x".repeat(254))) {
 
             assertThrows(InvalidArgsException.class,

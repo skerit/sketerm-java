@@ -216,12 +216,84 @@ The rules the wire contract insists on, mirrored here:
   and the NEXT request is refused; a redirect hop counts as a navigation;
 - nothing is durable: `PolicyStatus.durable()` is always false, because a policy and a profile
   default live for this MCP server's lifetime by design;
-- a host entry is a bare name or IP literal, so `*`, a scheme, a port or a path is refused by
-  `PolicyHosts` before the call goes out - write no policy rather than an allow-all one.
+- host entries are ASCII/punycode names or complete IP literals, optionally `host:port` or
+  `[IPv6]:port` (ports 1–65535). Names match their subdomains; IP literals match exactly (equivalent
+  spellings included), never as suffixes. `*`, schemes, paths, userinfo, scoped IPv6, malformed
+  addresses and numeric fragments such as `0.1` are refused locally by `PolicyHosts`;
+- explicit ports apply in every mode. A bare entry permits all ports ordinarily, but only the
+  scheme's default port in untrusted mode. An omitted/empty top-level list in untrusted mode defaults
+  to the opened URL's host **and effective port**.
 
-The vocabularies mirror the schema enums one for one: `ResourceType` (11 names), `UrlScheme` (7),
-`PolicySource` (3) and `DenialReason` (12), which is also the home of the 5-name `exhausted_reason`
-- that shorter list is derived as the members whose `latches()` is true, never restated.
+The vocabularies mirror the schema enums: `ResourceType`, `UrlScheme`, `PolicySource` and
+`DenialReason`. `exhausted_reason` is derived from members whose `latches()` is true, including
+`POLICY_REFUSED`; unknown reasons fail closed even when their refusal count is zero.
+
+#### Untrusted loading and colour scheme
+
+**Minimum Sketerm build:** commit `22c4b452` ("web: untrusted headless mode and native media
+emulation") or later, whose version field is `0.2.1`. No release tag contains that commit at the
+time of writing; an older binary reporting `0.2.1` is not sufficient. Check capability facts and
+use matching server/helper builds. Ordinary policies keep their existing wire shape and behavior.
+
+```java
+Browser browser = sketerm.browser();
+if (!browser.supportsUntrusted()) {
+    throw new IllegalStateException("This renderer requires Sketerm untrusted loading");
+}
+NetworkPolicy policy = NetworkPolicy.builder()
+        .untrusted()                         // policy.untrusted:true; untrusted(boolean) also exists
+        .allowHosts("content.example:443")
+        .allowSchemes(UrlScheme.HTTPS)
+        .deadline(Duration.ofSeconds(30))
+        .build();
+Page page = browser.openPage("https://content.example/", OpenOptions.viewport(1200, 800)
+        .withEphemeral()                     // required; shared and named identities are refused
+        .withRoute("direct")                 // required; omitted route also means direct
+        .withPolicy(policy)
+        .withColorScheme(ColorScheme.LIGHT)  // LIGHT -> light; DARK -> dark
+        .withTimeout(Duration.ofSeconds(30)));
+assert page.isPolicyActive();
+assert page.policy().untrusted();             // fresh, correlated enforcement attestation
+```
+
+- `browser.supportsUntrusted()` reads `capabilities.web_untrusted`; missing/null/false means no
+  support. This is a Linux headless build/platform fact, not proof of a particular installation.
+- `browser.supportsPolicyAcknowledgement()` reads `capabilities.web_policy_ack`. Missing/null means
+  false; **null is normal before the first helper handshake**, so do not require this pre-open.
+  Each untrusted open independently requires the helper's verified `untrusted-web` and
+  `net-policy-ack` capabilities and successful correlated installation acknowledgement before
+  browser creation.
+- `openPage` preflights untrusted support, requires an active untrusted echo from `web_open`, then
+  reads `web_policy` and verifies its restricted `enforced` facts. It throws a typed exception and
+  closes the returned handle best-effort if the attestation is missing or disagrees. It never
+  retries with ordinary loading. `isPolicyActive()` cannot report an unacknowledged untrusted
+  install as active; `PolicyStatus.untrusted()` reports verified enforcement, not requested mode.
+- Untrusted policies require ephemeral identity, direct routing and HTTP/HTTPS-only schemes.
+  Java rejects invalid combinations with `InvalidArgsException` before a call. Mode cannot be
+  set in either direction on a live patch (omit `untrusted` entirely), and untrusted policies cannot
+  be named-profile defaults. Set `.withEphemeral()` before attaching an untrusted policy.
+- `withRoute` also accepts `tor`, `via:host` and `on:host` for ordinary views when supported by the
+  backend; unknown routes fail locally. Untrusted opens explicitly send `route:"direct"`.
+- `withColorScheme` is headless-only and requires verified `web-emulation`. Sketerm applies it
+  before initial loading and requires a successful native media acknowledgement. The SDK checks
+  the returned colour echo, so an older server ignoring the option fails closed with
+  `ProtocolMismatchException`. Null clears the preference; every other fluent option preserves it.
+- Restricted loading confines native Internet sockets, including WebSocket, WebRTC and
+  WebTransport, uses an actual-address-validating HTTP broker, persists nothing, disables kernel
+  core dumps and independently supervises helper cleanup. JavaScript constructors may still exist:
+  test network reachability rather than their presence.
+- Typed refusal accounting includes `RESOLVED_PRIVATE_ADDRESS`, `UNTRUSTED_HTTP`,
+  `UNTRUSTED_TRANSPORT`, `UNTRUSTED_BROKER`, `UNTRUSTED_TIMEOUT`, `UNTRUSTED_QUEUE_FULL`,
+  `URL_TOO_LONG`, `MALFORMED_URL` and `POLICY_REFUSED` through `PolicyStatus.denied(reason)` and
+  `NetworkLog.NetworkRequest.reason()`.
+
+**Folio development/test origins work in untrusted mode.** Sketerm explicitly honors
+`.allowPrivateAddresses(true)` after DNS resolution as well as for literals. For
+`http://abc.folio.localhost:4420/`, use `.allowHosts("abc.folio.localhost:4420")` and
+`.allowSchemes(UrlScheme.HTTP)` with that opt-in. Use the concrete host, not `*.folio.localhost`;
+`folio.localhost:4420` also admits its subdomains. The scheme/host/port checks and native socket
+restrictions remain active. Without the opt-in loopback-resolving origins are refused. The
+ordinary policy's private-address check remains literal-only.
 
 ### Downloads and bulk results
 
@@ -354,3 +426,9 @@ underneath it, and skips itself when either is missing. Its second journey prove
 profile lifecycle over a loopback HTTP fixture (a `data:` document carries no cookies at all in
 Chromium), under its own `XDG_STATE_HOME` and instance name so the profile store is per run; it
 skips those steps when the copied binary predates the profile tools.
+
+`UntrustedPageIT` reuses the copied binaries and controls HTTP, WebSocket and UDP/STUN listeners.
+It proves ordinary network reachability, restricted HTTP loading at a loopback-resolving
+`abc.folio.localhost:<port>`, native dark emulation, and zero WebSocket/WebRTC traffic from the
+untrusted view. Missing binaries or an absent `web_untrusted` capability skip the journey;
+startup/enforcement failures on an advertised supported build fail the test.

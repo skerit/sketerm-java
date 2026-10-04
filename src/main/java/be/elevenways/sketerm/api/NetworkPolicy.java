@@ -29,14 +29,16 @@ import java.util.Set;
  * @param blockTypes resource classes to refuse outright
  * @param blockAds the built-in EasyList-subset filter, which defaults on; null leaves it alone
  * @param allowSchemes null or empty means the server's http+https default; about: is always allowed
- * @param allowPrivateAddresses whether loopback/private/link-local LITERALS are reachable, which
- *                              defaults to false; a hostname that merely resolves to one is not
- *                              detected, so the host list is the real defence
+ * @param allowPrivateAddresses whether private/loopback addresses are reachable; false by default.
+ *                              Ordinary mode checks literals only; untrusted mode also checks every
+ *                              resolved socket address. True explicitly permits local HTTP test origins,
+ *                              retaining host, port, scheme and native socket restrictions.
  * @param maxRequests every allowed request counts, the document included; null means unbounded
  * @param maxBytes received-body budget, accounted at response completion, so the response that
  *                 CROSSES the cap completes and the NEXT request is refused
  * @param maxNavigations main-frame loads, redirect hops included
  * @param deadline wall-clock budget from the open
+ * @param untrusted null leaves the mode unset; true requires Linux headless, direct, ephemeral loading
  */
 public record NetworkPolicy(List<String> allowHosts,
                             List<String> allowSubresourceHosts,
@@ -47,7 +49,22 @@ public record NetworkPolicy(List<String> allowHosts,
                             Integer maxRequests,
                             Long maxBytes,
                             Integer maxNavigations,
-                            Duration deadline) {
+                            Duration deadline,
+                            Boolean untrusted) {
+
+    /** Backward-compatible constructor for ordinary policies. */
+    public NetworkPolicy(List<String> allowHosts, List<String> allowSubresourceHosts,
+                         Set<ResourceType> blockTypes, Boolean blockAds, Set<UrlScheme> allowSchemes,
+                         Boolean allowPrivateAddresses, Integer maxRequests, Long maxBytes,
+                         Integer maxNavigations, Duration deadline) {
+        this(allowHosts, allowSubresourceHosts, blockTypes, blockAds, allowSchemes,
+                allowPrivateAddresses, maxRequests, maxBytes, maxNavigations, deadline, null);
+    }
+
+    /** Whether this policy requires the restricted helper, rather than ordinary loading. */
+    public boolean requiresUntrusted() {
+        return Boolean.TRUE.equals(this.untrusted);
+    }
 
     public NetworkPolicy {
         allowHosts = hosts(allowHosts, "allow_hosts");
@@ -61,6 +78,12 @@ public record NetworkPolicy(List<String> allowHosts,
 
         if (deadline != null && deadline.isNegative()) {
             throw new InvalidArgsException("policy.deadline_ms must not be negative",
+                    "web_open", false, null);
+        }
+
+        if (Boolean.TRUE.equals(untrusted) && allowSchemes.stream()
+                .anyMatch(scheme -> scheme != UrlScheme.HTTP && scheme != UrlScheme.HTTPS)) {
+            throw new InvalidArgsException("Untrusted policy allows HTTP/HTTPS only",
                     "web_open", false, null);
         }
     }
@@ -133,6 +156,9 @@ public record NetworkPolicy(List<String> allowHosts,
             wire.put("deadline_ms", this.deadline.toMillis());
         }
 
+        if (this.untrusted != null) {
+            wire.put("untrusted", this.untrusted);
+        }
         return wire;
     }
 
@@ -175,6 +201,13 @@ public record NetworkPolicy(List<String> allowHosts,
             builder.allowPrivateAddresses(Json.optBool(policy, "allow_private_addresses", false));
         }
 
+        if (policy.containsKey("untrusted")) {
+            Object mode = policy.get("untrusted");
+            if (!(mode instanceof Boolean value)) {
+                throw new ProtocolMismatchException("policy.untrusted must be a boolean");
+            }
+            builder.untrusted(value);
+        }
         Long requests = positive(policy, "max_requests");
         Long bytes = positive(policy, "max_bytes");
         Long navigations = positive(policy, "max_navigations");
@@ -215,8 +248,23 @@ public record NetworkPolicy(List<String> allowHosts,
         private Long maxBytes;
         private Integer maxNavigations;
         private Duration deadline;
+        private Boolean untrusted;
 
         private Builder() {
+        }
+
+        /**
+         * Require Sketerm's Linux-only restricted helper and correlated policy acknowledgement.
+         * Open with an ephemeral identity on the direct route. Cannot be a profile default or live patch.
+         */
+        public Builder untrusted() {
+            return this.untrusted(true);
+        }
+
+        /** Set mode explicitly; omit this call on live patches, even when the value is false. */
+        public Builder untrusted(boolean untrusted) {
+            this.untrusted = untrusted;
+            return this;
         }
 
         /**
@@ -275,7 +323,8 @@ public record NetworkPolicy(List<String> allowHosts,
         }
 
         /**
-         * @param allowed whether loopback/private/link-local literals may be reached at all
+         * @param allowed whether private/loopback addresses may be reached; also applies after DNS
+         *                resolution in untrusted mode, retaining host/port and transport restrictions
          */
         public Builder allowPrivateAddresses(boolean allowed) {
             this.allowPrivateAddresses = allowed;
@@ -312,7 +361,8 @@ public record NetworkPolicy(List<String> allowHosts,
                     this.maxRequests,
                     this.maxBytes,
                     this.maxNavigations,
-                    this.deadline);
+                    this.deadline,
+                    this.untrusted);
         }
 
         private static void add(List<String> target, Collection<String> hosts) {

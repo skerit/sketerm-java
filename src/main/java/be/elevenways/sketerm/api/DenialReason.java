@@ -6,10 +6,10 @@ import java.util.Set;
 
 /**
  * THE refusal vocabulary, mirroring protocol.NetReason: why one request was blocked, and - for the
- * four budget members - why a whole view's policy latched.
+ * latching members - why a whole view's policy latched.
  *
- * <p>AIDEV-NOTE: the schemas spell this vocabulary twice, as web_network's 12-name request
- * {@code reason} and as web_policy's 5-name {@code exhausted_reason}, but the server has one
+ * <p>AIDEV-NOTE: the schemas spell this vocabulary twice, as web_network's per-request
+ * {@code reason} and as web_policy's {@code exhausted_reason}, but the server has one
  * declaring home and the second list is the subset that can LATCH. So this enum is that one home
  * and {@link #latches()} carries the subset as a fact on the member; {@link #EXHAUSTION_REASONS}
  * derives the shorter list rather than restating it.</p>
@@ -39,7 +39,25 @@ public enum DenialReason implements WireValue {
     /** max_navigations is spent, redirect hops included; the policy has LATCHED. */
     NAV_CAP("nav_cap", true),
     /** deadline_ms ran out; the policy has LATCHED. */
-    DEADLINE("deadline", true);
+    DEADLINE("deadline", true),
+    /** A resolved destination is private, special-purpose, or an address on this host. */
+    RESOLVED_PRIVATE_ADDRESS("resolved_private_address", false),
+    /** Unsupported HTTP shape (for example upgrades, ranges or authentication). */
+    UNTRUSTED_HTTP("untrusted_http", false),
+    /** A network lane disabled by restricted loading. */
+    UNTRUSTED_TRANSPORT("untrusted_transport", false),
+    /** The restricted HTTP broker refused the load. */
+    UNTRUSTED_BROKER("untrusted_broker", false),
+    /** Installation/replacement was refused; the policy has latched fail-closed. */
+    POLICY_REFUSED("policy_refused", true),
+    /** The URL exceeded the restricted loader's limit. */
+    URL_TOO_LONG("url_too_long", false),
+    /** Malformed URL authority or port. */
+    MALFORMED_URL("malformed_url", false),
+    /** The broker's per-load deadline expired, including time queued. */
+    UNTRUSTED_TIMEOUT("untrusted_timeout", false),
+    /** Both the broker's active jobs and waiting queue are full. */
+    UNTRUSTED_QUEUE_FULL("untrusted_queue_full", false);
 
     /**
      * The members web_policy's exhausted_reason can name, {@link #NONE} included: derived from the

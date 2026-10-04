@@ -17,6 +17,8 @@ import java.time.Duration;
  *               only, and fail-closed - a helper that cannot enforce it opens nothing
  * @param capture a response-body CAPTURE, recording from the view's first request on; headless
  *                only, and fail-closed - a helper that cannot capture opens nothing
+ * @param route null uses direct; otherwise direct, tor, via:host or on:host (backend permitting)
+ * @param colorScheme headless preferred colour scheme, installed before the first document; null keeps defaults
  */
 public record OpenOptions(Integer width,
                           Integer height,
@@ -24,7 +26,21 @@ public record OpenOptions(Integer width,
                           String profile,
                           boolean ephemeral,
                           NetworkPolicy policy,
-                          CaptureFilter capture) {
+                          CaptureFilter capture,
+                          String route,
+                          ColorScheme colorScheme) {
+
+    /** Backward-compatible constructor with direct routing and default colours. */
+    public OpenOptions(Integer width, Integer height, Duration timeout, String profile,
+                       boolean ephemeral, NetworkPolicy policy) {
+        this(width, height, timeout, profile, ephemeral, policy, null, null, null);
+    }
+
+    /** Backward-compatible constructor for response-body capture. */
+    public OpenOptions(Integer width, Integer height, Duration timeout, String profile,
+                       boolean ephemeral, NetworkPolicy policy, CaptureFilter capture) {
+        this(width, height, timeout, profile, ephemeral, policy, capture, null, null);
+    }
 
     public OpenOptions {
 
@@ -36,6 +52,21 @@ public record OpenOptions(Integer width,
             }
 
             ProfileNames.require(profile, "web_open");
+        }
+
+        if (route != null && !route.equals("direct") && !route.equals("tor")
+                && !route.matches("(?:via|on):[^\\s:]+")) {
+            throw new InvalidArgsException("Unknown browser route: " + route, "web_open", false, null);
+        }
+        if (policy != null && policy.requiresUntrusted()) {
+            if (!ephemeral || profile != null) {
+                throw new InvalidArgsException("Untrusted policy requires ephemeral:true and no named profile",
+                        "web_open", false, null);
+            }
+            if (route != null && !route.equals("direct")) {
+                throw new InvalidArgsException("Untrusted policy requires the direct route",
+                        "web_open", false, null);
+            }
         }
     }
 
@@ -94,25 +125,29 @@ public record OpenOptions(Integer width,
     }
 
     public OpenOptions withViewport(int width, int height) {
-        return new OpenOptions(width, height, this.timeout, this.profile, this.ephemeral, this.policy, this.capture);
+        return new OpenOptions(width, height, this.timeout, this.profile, this.ephemeral, this.policy,
+                this.capture, this.route, this.colorScheme);
     }
 
     public OpenOptions withTimeout(Duration timeout) {
-        return new OpenOptions(this.width, this.height, timeout, this.profile, this.ephemeral, this.policy, this.capture);
+        return new OpenOptions(this.width, this.height, timeout, this.profile, this.ephemeral, this.policy,
+                this.capture, this.route, this.colorScheme);
     }
 
     /**
      * @param policy the enforced policy, or null to open unpoliced
      */
     public OpenOptions withPolicy(NetworkPolicy policy) {
-        return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, policy, this.capture);
+        return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, policy,
+                this.capture, this.route, this.colorScheme);
     }
 
     /**
      * @param capture the capture to install at open, or null to open uncaptured
      */
     public OpenOptions capturing(CaptureFilter capture) {
-        return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy, capture);
+        return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
+                capture, this.route, this.colorScheme);
     }
 
     /**
@@ -120,20 +155,38 @@ public record OpenOptions(Integer width,
      *         already ask for an ephemeral identity (say {@link #withDefaultIdentity()} first)
      */
     public OpenOptions withProfile(String profile) {
-        return new OpenOptions(this.width, this.height, this.timeout, profile, this.ephemeral, this.policy, this.capture);
+        return new OpenOptions(this.width, this.height, this.timeout, profile, this.ephemeral, this.policy,
+                this.capture, this.route, this.colorScheme);
     }
 
     /**
      * @throws InvalidArgsException when these options already name a profile
      */
     public OpenOptions withEphemeral() {
-        return new OpenOptions(this.width, this.height, this.timeout, this.profile, true, this.policy, this.capture);
+        return new OpenOptions(this.width, this.height, this.timeout, this.profile, true, this.policy,
+                this.capture, this.route, this.colorScheme);
     }
 
     /**
      * Drop the identity choice, back to the shared default cookie jar.
      */
     public OpenOptions withDefaultIdentity() {
-        return new OpenOptions(this.width, this.height, this.timeout, null, false, this.policy, this.capture);
+        return new OpenOptions(this.width, this.height, this.timeout, null, false, this.policy,
+                this.capture, this.route, this.colorScheme);
+    }
+
+    /** Select a network route; untrusted policies accept direct only. */
+    public OpenOptions withRoute(String route) {
+        return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
+                this.capture, route, this.colorScheme);
+    }
+
+    /**
+     * Headless colour preference, applied before initial loading. Unsupported helpers refuse the open.
+     * Null clears the preference and keeps Sketerm's default.
+     */
+    public OpenOptions withColorScheme(ColorScheme colorScheme) {
+        return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
+                this.capture, this.route, colorScheme);
     }
 }

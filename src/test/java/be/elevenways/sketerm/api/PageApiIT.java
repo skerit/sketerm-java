@@ -636,7 +636,7 @@ class PageApiIT {
     /**
      * @param instance the server instance name, which also keys its profile store
      */
-    private static SketermOptions.Builder options(String instance) throws IOException {
+    static SketermOptions.Builder options(String instance) throws IOException {
 
         Files.createDirectories(Path.of(RUNTIME_DIR));
 
