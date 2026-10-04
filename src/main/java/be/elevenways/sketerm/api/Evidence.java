@@ -1,5 +1,6 @@
 package be.elevenways.sketerm.api;
 
+import be.elevenways.protoblast.common.time.Now;
 import be.elevenways.sketerm.json.Json;
 
 import java.io.IOException;
@@ -88,7 +89,7 @@ public record Evidence(String finalUrl,
      */
     public static Evidence capture(Page page, EnumSet<Part> parts) {
 
-        Instant capturedAt = Instant.now();
+        Instant capturedAt = Now.instant();
 
         // Re-read the identity first, so the url and title describe the page the parts came from
         // rather than whatever the last call happened to leave behind.

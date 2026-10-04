@@ -1,5 +1,6 @@
 package be.elevenways.sketerm.rpc;
 
+import be.elevenways.protoblast.common.time.Now;
 import be.elevenways.sketerm.json.Json;
 import be.elevenways.sketerm.process.SketermProcess;
 import org.junit.jupiter.api.DisplayName;
@@ -67,9 +68,9 @@ class StdioSubprocessTest {
 
         assertTrue(process.isAlive(), "the child started");
 
-        long started = System.currentTimeMillis();
+        long started = Now.millis();
         process.close(300);
-        long elapsed = System.currentTimeMillis() - started;
+        long elapsed = Now.millis() - started;
 
         assertFalse(process.isAlive(), "the child was force-killed");
         assertTrue(elapsed < 5_000, "close did not hang, it took " + elapsed + "ms");

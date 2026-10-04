@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static be.elevenways.sketerm.api.FakeSketermServer.map;
 
 /**
  * How a structured failure, a stale id and a pre-migration answer each land in the api layer.
@@ -201,16 +202,5 @@ class ApiErrorMappingTest {
         structured.putAll(extra);
 
         return structured;
-    }
-
-    private static Map<String, Object> map(Object... keysAndValues) {
-
-        Map<String, Object> result = new LinkedHashMap<>();
-
-        for (int i = 0; i < keysAndValues.length; i += 2) {
-            result.put((String) keysAndValues[i], keysAndValues[i + 1]);
-        }
-
-        return result;
     }
 }

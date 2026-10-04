@@ -20,6 +20,32 @@ import java.util.function.Function;
  */
 final class FakeSketermServer {
 
+    /**
+     * An ordered map of alternating keys and values.
+     */
+    static Map<String, Object> map(Object... keysAndValues) {
+
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        for (int i = 0; i < keysAndValues.length; i += 2) {
+            result.put((String) keysAndValues[i], keysAndValues[i + 1]);
+        }
+
+        return result;
+    }
+
+    /**
+     * The fields every browser answer carries, merged with the ones this call adds.
+     */
+    static Map<String, Object> facts(Map<String, Object> extra) {
+
+        Map<String, Object> structured = map("backend", "headless", "origin", "https://example.test",
+                "url", "https://example.test/", "title", "Example", "loading", false);
+        structured.putAll(extra);
+
+        return structured;
+    }
+
     private final Map<String, Function<Map<String, Object>, Map<String, Object>>> tools = new LinkedHashMap<>();
     private final List<Call> calls = new ArrayList<>();
 

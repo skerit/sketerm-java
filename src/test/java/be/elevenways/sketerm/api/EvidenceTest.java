@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -20,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static be.elevenways.sketerm.api.FakeSketermServer.facts;
+import static be.elevenways.sketerm.api.FakeSketermServer.map;
 
 /**
  * Evidence capture: one page, one moment, composed out of the reads that already exist.
@@ -255,25 +256,5 @@ class EvidenceTest {
                 "max_bytes", 0,
                 "max_navigations", 0,
                 "deadline_ms", 0);
-    }
-
-    private static Map<String, Object> facts(Map<String, Object> extra) {
-
-        Map<String, Object> structured = map("backend", "headless", "origin", "https://example.test",
-                "url", "https://example.test/", "title", "Example", "loading", false);
-        structured.putAll(extra);
-
-        return structured;
-    }
-
-    private static Map<String, Object> map(Object... keysAndValues) {
-
-        Map<String, Object> result = new LinkedHashMap<>();
-
-        for (int i = 0; i < keysAndValues.length; i += 2) {
-            result.put((String) keysAndValues[i], keysAndValues[i + 1]);
-        }
-
-        return result;
     }
 }

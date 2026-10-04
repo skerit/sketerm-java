@@ -16,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static be.elevenways.sketerm.api.FakeSketermServer.facts;
+import static be.elevenways.sketerm.api.FakeSketermServer.map;
 
 /**
  * The enforced-network-policy half of the api layer: what goes out, what comes back, and what a
@@ -511,25 +513,5 @@ class PolicyApiTest {
                 "max_bytes", 0,
                 "max_navigations", 0,
                 "deadline_ms", 0);
-    }
-
-    private static Map<String, Object> facts(Map<String, Object> extra) {
-
-        Map<String, Object> structured = map("backend", "headless", "origin", "https://example.test",
-                "url", "https://example.test/", "title", "Example", "loading", false);
-        structured.putAll(extra);
-
-        return structured;
-    }
-
-    private static Map<String, Object> map(Object... keysAndValues) {
-
-        Map<String, Object> result = new LinkedHashMap<>();
-
-        for (int i = 0; i < keysAndValues.length; i += 2) {
-            result.put((String) keysAndValues[i], keysAndValues[i + 1]);
-        }
-
-        return result;
     }
 }

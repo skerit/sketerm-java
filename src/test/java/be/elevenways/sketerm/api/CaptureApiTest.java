@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static be.elevenways.sketerm.api.FakeSketermServer.map;
 
 /**
  * Drives response-body capture (web_open capture, web_capture, web_capture_set, web_wait
@@ -364,16 +365,5 @@ class CaptureApiTest {
         structured.putAll(extra);
 
         return structured;
-    }
-
-    private static Map<String, Object> map(Object... keysAndValues) {
-
-        Map<String, Object> result = new LinkedHashMap<>();
-
-        for (int i = 0; i < keysAndValues.length; i += 2) {
-            result.put((String) keysAndValues[i], keysAndValues[i + 1]);
-        }
-
-        return result;
     }
 }

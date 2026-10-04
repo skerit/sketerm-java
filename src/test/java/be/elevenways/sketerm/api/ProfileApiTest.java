@@ -3,7 +3,6 @@ package be.elevenways.sketerm.api;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -12,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static be.elevenways.sketerm.api.FakeSketermServer.facts;
+import static be.elevenways.sketerm.api.FakeSketermServer.map;
 
 /**
  * The lifecycle half of the browser face: closing a view, and the named identities one can hold.
@@ -319,28 +320,5 @@ class ProfileApiTest {
                 () -> server.browser().openPage("https://example.test/"));
 
         assertTrue(failure.getMessage().contains("borrowed"), "the unknown token is named");
-    }
-
-    /**
-     * The fields every headless browser answer carries, merged with the ones this call adds.
-     */
-    private static Map<String, Object> facts(Map<String, Object> extra) {
-
-        Map<String, Object> structured = map("backend", "headless", "origin", "https://example.test",
-                "url", "https://example.test/", "title", "Example", "loading", false);
-        structured.putAll(extra);
-
-        return structured;
-    }
-
-    private static Map<String, Object> map(Object... keysAndValues) {
-
-        Map<String, Object> result = new LinkedHashMap<>();
-
-        for (int i = 0; i < keysAndValues.length; i += 2) {
-            result.put((String) keysAndValues[i], keysAndValues[i + 1]);
-        }
-
-        return result;
     }
 }
