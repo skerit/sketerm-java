@@ -3,9 +3,13 @@ package be.elevenways.sketerm.api;
 import be.elevenways.sketerm.json.Json;
 import be.elevenways.sketerm.mcp.Content;
 import be.elevenways.sketerm.mcp.ToolResult;
+import be.elevenways.sketerm.api.PageStream.Listener;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +49,8 @@ public final class Page {
     private boolean closed;
     private CloseResult closeResult;
     private Snapshot lastSnapshot;
+    private final List<PageStream> streams = new ArrayList<>();
+    private boolean streamsClosed;
 
     Page(ToolCalls calls, int handle, Map<String, Object> structured, Snapshot opening) {
         this.calls = calls;
@@ -270,6 +276,7 @@ public final class Page {
             return this.closeResult;
         }
 
+        this.closeStreams();
         Map<String, Object> structured = this.calls.structured("web_close", this.args());
 
         this.closed = true;
@@ -740,6 +747,245 @@ public final class Page {
         }
 
         throw new ProtocolMismatchException("web_screenshot answered without an image content block");
+    }
+
+    /**
+     * Send key chords as TRUSTED key events, the input path a real keystroke rides, so Tab order,
+     * Escape-to-dismiss and Enter-to-submit behave as for a person.
+     *
+     * @param keys space-separated chords, e.g. "Tab Tab Enter" or "ctrl+a"
+     */
+    public KeyResult key(String keys) {
+        return this.key(keys, null);
+    }
+
+    /**
+     * @param timeout the budget for the keys to settle, the server's default when null
+     */
+    public KeyResult key(String keys, Duration timeout) {
+
+        if (keys == null || keys.isBlank()) {
+            throw new IllegalArgumentException("web_key needs at least one chord");
+        }
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("keys", keys);
+        ToolCalls.putTimeout(arguments, timeout);
+
+        Map<String, Object> structured = this.calls.structured("web_key", arguments);
+        this.absorb(structured);
+
+        return KeyResult.decode(structured);
+    }
+
+    /** The most events one {@link #input} call carries, as the server caps it. */
+    public static final int MAX_INPUT_EVENTS = 64;
+
+    /**
+     * Drive the view by hand: pointer edges, wheel steps, key edges and text, in order, as the trusted input a
+     * real mouse and keyboard ride. Nothing waits for the page; {@link #frame} shows what it did.
+     *
+     * @throws InvalidArgsException for an empty batch or one over {@link #MAX_INPUT_EVENTS}, before the call
+     */
+    public InputResult input(List<InputEvent> events) {
+
+        if (events == null || events.isEmpty() || events.size() > MAX_INPUT_EVENTS) {
+            throw new InvalidArgsException("web_input takes 1 to " + MAX_INPUT_EVENTS + " events, got "
+                    + (events == null ? 0 : events.size()), "web_input", false, null);
+        }
+
+        List<Object> wire = new ArrayList<>(events.size());
+
+        for (InputEvent event : events) {
+            wire.add(event.toWire());
+        }
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("events", wire);
+
+        Map<String, Object> structured = this.calls.structured("web_input", arguments);
+        this.absorb(structured);
+
+        return InputResult.decode(structured);
+    }
+
+    /**
+     * @see #input(List)
+     */
+    public InputResult input(InputEvent... events) {
+        return this.input(List.of(events));
+    }
+
+    /**
+     * The listener is installed before authentication so the initial surface and damage cannot be lost.
+     *
+     * @author Jelle De Loecker
+     * @since 0.1.0
+     */
+    public @NonNull PageStream stream(@NonNull Listener listener) {
+        return this.stream(listener, null);
+    }
+
+    /** A non-null cap changes the view's CEF paint rate and persists after stream close. */
+    public @NonNull PageStream stream(@NonNull Listener listener, @Nullable Integer maxFps) {
+        if (listener == null) throw new IllegalArgumentException("A stream needs a listener");
+        synchronized (this.streams) {
+            if (this.streamsClosed || this.closed) throw new PageClosedException(this.handle, "stream()");
+        }
+        OpenOptions.requireMaxFps(maxFps, "web_stream");
+        if (maxFps != null && !Browser.capability(this.calls, "web_max_fps")) {
+            throw new UnavailableException("Sketerm does not advertise web_max_fps; no stream was opened",
+                    "web_stream", false, null);
+        }
+        Map<String, Object> arguments = this.args();
+        ToolCalls.put(arguments, "max_fps", maxFps);
+        Map<String, Object> facts = this.calls.structured("web_stream", arguments);
+        PageStream stream = PageStream.connect(facts, this.handle, listener, this.calls, this::pruneStreams);
+        try {
+            if (maxFps != null && !Long.valueOf(maxFps.longValue()).equals(Json.optLong(facts, "max_fps"))) {
+                throw new ProtocolMismatchException("web_stream did not acknowledge max_fps: " + maxFps);
+            }
+            synchronized (this.streams) {
+                if (this.closed || this.streamsClosed) throw new PageClosedException(this.handle, "stream()");
+                this.streams.add(stream);
+                this.calls.ownStream(stream);
+            }
+            return stream;
+        } catch (RuntimeException | Error failure) {
+            stream.close();
+            throw failure;
+        }
+    }
+
+    private void closeStreams() {
+        List<PageStream> owned;
+        synchronized (this.streams) {
+            this.streamsClosed = true;
+            owned = List.copyOf(this.streams);
+            this.streams.clear();
+        }
+        for (PageStream stream : owned) stream.close();
+    }
+
+    private void pruneStreams() {
+        synchronized (this.streams) {
+            this.streams.removeIf(PageStream::isClosed);
+        }
+    }
+
+    /**
+     * The view's newest painted frame as a JPEG once it differs from {@code since}, waiting up to
+     * {@code timeout} for a paint: a long-poll frame stream when each call passes the previous serial.
+     *
+     * @param since the serial already drawn, 0 for any painted frame
+     * @param timeout how long to wait for a newer paint, the server's default (1s) when null
+     */
+    public Frame frame(long since, Duration timeout) {
+        return this.frame(since, FrameFormat.JPEG, null, null, timeout);
+    }
+
+    /**
+     * @param quality JPEG quality 1-100, the server's default (70) when null
+     * @param maxWidth downscale wider frames to this many pixels, none when null
+     */
+    public Frame frame(long since, FrameFormat format, Integer quality, Integer maxWidth, Duration timeout) {
+
+        if (since < 0) {
+            throw new IllegalArgumentException("A frame serial is never negative: " + since);
+        }
+
+        Map<String, Object> arguments = this.args();
+
+        if (since != 0) {
+            arguments.put("since", since);
+        }
+
+        arguments.put("format", (format == null ? FrameFormat.JPEG : format).wire());
+        ToolCalls.put(arguments, "quality", quality);
+        ToolCalls.put(arguments, "max_width", maxWidth);
+        ToolCalls.putTimeout(arguments, timeout);
+
+        ToolResult result = this.calls.call("web_frame", arguments);
+        Map<String, Object> structured = this.calls.structured("web_frame", arguments, result);
+        this.absorb(structured);
+
+        byte[] image = null;
+
+        for (Content block : result.content()) {
+            if (block instanceof Content.Image picture) {
+                image = Base64.getDecoder().decode(picture.data());
+                break;
+            }
+        }
+
+        Frame frame = Frame.decode(structured, image);
+
+        if (!frame.unchanged() && frame.bytes().length == 0) {
+            throw new ProtocolMismatchException("web_frame answered a new frame without an image content block");
+        }
+
+        return frame;
+    }
+
+    /**
+     * Resize the viewport in place; the server takes 320-3840 by 240-2160 logical pixels.
+     */
+    public Viewport resize(int width, int height) {
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("width", width);
+        arguments.put("height", height);
+
+        Map<String, Object> structured = this.calls.structured("web_resize", arguments);
+        this.absorb(structured);
+
+        return Viewport.decode(structured);
+    }
+
+    /**
+     * Every console line the server still holds for this view.
+     */
+    public ConsoleLog console() {
+        return this.console(0, null);
+    }
+
+    /**
+     * @param since only lines newer than a previous {@link ConsoleLog#lastId()}
+     * @param max the most recent N lines, the server's default (100) when null
+     */
+    public ConsoleLog console(long since, Integer max) {
+
+        Map<String, Object> arguments = this.args();
+
+        if (since != 0) {
+            arguments.put("since", since);
+        }
+
+        ToolCalls.put(arguments, "max", max);
+
+        Map<String, Object> structured = this.calls.structured("web_console", arguments);
+        this.absorb(structured);
+
+        return ConsoleLog.decode(structured);
+    }
+
+    /**
+     * Review the whole live document: landmarks, focus, control names, disclosure mismatches,
+     * horizontal overflow, and the page and console errors seen.
+     */
+    public Inspection inspect() {
+        return this.inspect(null);
+    }
+
+    /**
+     * @param selector a CSS selector the findings are narrowed to, or null for the whole document
+     */
+    public Inspection inspect(String selector) {
+
+        Map<String, Object> arguments = this.args();
+        ToolCalls.put(arguments, "selector", selector);
+
+        return Inspection.decode(this.calls.structured("web_inspect", arguments));
     }
 
     /**

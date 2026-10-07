@@ -46,6 +46,10 @@ public final class Browser {
      * @throws UnavailableException when the server returned a handle that is no longer an open view
      */
     public Page openPage(String url, OpenOptions options) {
+        if (options != null && options.maxFps() != null && !this.supportsMaxFps()) {
+            throw new UnavailableException("Sketerm does not advertise web_max_fps; nothing was opened",
+                    "web_open", false, null);
+        }
 
         boolean untrusted = options != null && options.policy() != null && options.policy().requiresUntrusted();
         if (untrusted && !this.supportsUntrusted()) {
@@ -61,6 +65,7 @@ public final class Browser {
             ToolCalls.putTimeout(arguments, options.timeout());
             ToolCalls.put(arguments, "route", options.route());
             ToolCalls.put(arguments, "color_scheme", options.colorScheme() == null ? null : options.colorScheme().wire());
+            ToolCalls.put(arguments, "max_fps", options.maxFps());
             if (untrusted) arguments.put("route", "direct");
 
             if (options.profile() != null) {
@@ -84,6 +89,10 @@ public final class Browser {
         int handle = Handles.of(structured, "web_open");
 
         try {
+            if (options != null && options.maxFps() != null
+                    && !Long.valueOf(options.maxFps().longValue()).equals(Json.optLong(structured, "max_fps"))) {
+                throw new ProtocolMismatchException("web_open did not acknowledge max_fps: " + options.maxFps());
+            }
             if (options != null && options.colorScheme() != null
                     && !options.colorScheme().wire().equals(Json.optStr(structured, "color_scheme"))) {
                 throw new ProtocolMismatchException("web_open did not acknowledge color_scheme: "
@@ -249,6 +258,27 @@ public final class Browser {
     }
 
     /**
+     * Preflight: whether this server can run the web_* tools at all (a helper it can start, or a GUI).
+     *
+     * @return the capabilities report's web flag, false when the server names none
+     */
+    public boolean isAvailable() {
+        return this.capability("web");
+    }
+
+    /**
+     * Preflight: whether the web tools drive this server's own headless helper rather than a GUI the
+     * user owns (the {@code web_gui} grant), where policies, profiles and capture are refused.
+     *
+     * Before the first web call a real server reports web_backend "not_yet_determined", so the
+     * answer reads the grant: headless unless web_gui is true or the backend is already "gui".
+     */
+    public boolean isHeadless() {
+        Map<String, Object> capabilities = this.calls.structured("capabilities", ToolCalls.args());
+        return !Boolean.TRUE.equals(capabilities.get("web_gui")) && !"gui".equals(capabilities.get("web_backend"));
+    }
+
+    /**
      * Preflight: whether this server advertises named browsing profiles at all.
      *
      * Worth asking before offering the feature, since a refusal is fail-closed and opens
@@ -285,6 +315,39 @@ public final class Browser {
         return this.capability("web_capture");
     }
 
+    /**
+     * Preflight: whether {@link Page#input} can drive this server's views by hand (headless only).
+     *
+     * @return the capabilities report's web_input flag, false when the server names none
+     */
+    public boolean supportsInput() {
+        return this.capability("web_input");
+    }
+
+    /**
+     * Preflight: whether {@link Page#frame} can stream this server's painted frames (headless only).
+     *
+     * @return the capabilities report's web_frames flag, false when the server names none
+     */
+    public boolean supportsFrames() {
+        return this.capability("web_frames");
+    }
+
+    /**
+     * Missing or null web_stream means the server cannot offer binary page streams.
+     *
+     * @author Jelle De Loecker
+     * @since 0.1.0
+     */
+    public boolean supportsStreams() {
+        return this.capability("web_stream");
+    }
+
+    /** Missing or false web_max_fps means explicit headless caps are unsupported. */
+    public boolean supportsMaxFps() {
+        return this.capability("web_max_fps");
+    }
+
     /** Build/platform support for Linux headless untrusted loading; absent means unsupported. */
     public boolean supportsUntrusted() {
         return this.capability("web_untrusted");
@@ -299,7 +362,12 @@ public final class Browser {
     }
 
     private boolean capability(String fact) {
-        Object value = this.calls.structured("capabilities", ToolCalls.args()).get(fact);
+        return capability(this.calls, fact);
+    }
+
+    /** @return the capabilities report's boolean fact, false when missing or null */
+    static boolean capability(ToolCalls calls, String fact) {
+        Object value = calls.structured("capabilities", ToolCalls.args()).get(fact);
         if (value == null) return false;
         if (!(value instanceof Boolean supported)) {
             throw new ProtocolMismatchException("capabilities." + fact + " must be boolean or null");

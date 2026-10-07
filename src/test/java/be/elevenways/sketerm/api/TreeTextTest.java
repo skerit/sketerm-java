@@ -97,6 +97,39 @@ class TreeTextTest {
     }
 
     @Test
+    @DisplayName("An exact name wins over a longer one, and several equal matches are refused rather than guessed")
+    void findPrefersExactNamesAndRefusesAmbiguity() {
+
+        Snapshot snapshot = Snapshot.decode(7, Map.of(
+                "kind", "full",
+                "document", 1,
+                "revision", 1,
+                "snapshot", """
+                        [1] document "News"
+                          [2] heading "Subscribe"
+                          [3] button "Unsubscribe"
+                          [4] button "Subscribe"
+                        """), "web_snapshot");
+
+        // 1. Within its role, the exact name wins over "Unsubscribe", which comes first and contains it.
+        assertEquals(4, snapshot.find("button", "subscribe").orElseThrow().id(), "step 1: the exact button");
+
+        // 2. Without a role, the heading and the button carry the same name: refused, both candidates named.
+        AmbiguousMatchException byName = assertThrows(AmbiguousMatchException.class,
+                () -> snapshot.find("Subscribe"), "step 2: a name two roles carry");
+        assertEquals(List.of(2, 4), byName.matches().stream().map(TreeNode::id).toList(), "step 2: both exact nodes");
+        assertTrue(byName.getMessage().contains("[2] heading \"Subscribe\", [4] button \"Subscribe\""),
+                "step 2: the message lists them: " + byName.getMessage());
+        assertTrue(byName.getMessage().endsWith("act on one by its id"), "step 2: and says how to choose");
+
+        // 3. Text no name equals but two contain is refused too; text only one contains still finds it.
+        AmbiguousMatchException partial = assertThrows(AmbiguousMatchException.class,
+                () -> snapshot.find("button", "subscri"), "step 3: a fragment two buttons contain");
+        assertEquals(List.of(3, 4), partial.matches().stream().map(TreeNode::id).toList(), "step 3: both buttons");
+        assertEquals(3, snapshot.find("unsub").orElseThrow().id(), "step 3: a fragment one name contains");
+    }
+
+    @Test
     @DisplayName("A direct snapshot payload without a tree is refused by name")
     void directSnapshotWithoutATree() {
 

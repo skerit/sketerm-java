@@ -5,3 +5,6 @@ out/
 .idea/
 *.iml
 .vscode/
+.classpath
+.project
+.settings/

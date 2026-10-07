@@ -1,6 +1,10 @@
 package be.elevenways.sketerm.process;
 
-import be.elevenways.protoblast.common.thread.JobRunner;
+import be.elevenways.protoblast.server.process.CapturedOutput;
+import be.elevenways.protoblast.server.process.ProcessOutcome;
+import be.elevenways.protoblast.server.process.RunningProcess;
+import be.elevenways.protoblast.server.process.Subprocess;
+import be.elevenways.protoblast.server.process.SubprocessException;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -9,54 +13,55 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayDeque;
+import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Deque;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeoutException;
 
 /**
- * A supervised Sketerm child process: UTF-8 line streams plus a stderr ring kept for diagnostics.
+ * A supervised Sketerm child process: UTF-8 line streams plus a stderr tail kept for diagnostics.
  *
- * A shutdown hook destroys the child, so a crashed JVM never orphans a browser.
+ * The child runs through protoblast's {@link Subprocess}, so a forced stop reaches its whole
+ * process tree and a crashed JVM never orphans a browser.
+ *
+ * AIDEV-NOTE: closing sends end-of-file first, which `sketerm mcp` answers by shutting its
+ * browser helpers down itself (measured: gone in about 0.2s with every child reaped). Only a child
+ * that outlives the close timeout is stopped as a tree: SIGTERM to the root and its descendants,
+ * SIGKILL after {@link #STOP_GRACE}. Signalling the tree straight away would hit the helpers
+ * before Sketerm flushed their profile cookies.
  */
 public final class SketermProcess implements AutoCloseable {
 
-    /** How many stderr lines the diagnostic ring keeps. */
+    /** How many stderr lines {@link #getStderrTail()} keeps. */
     public static final int STDERR_RING_SIZE = 200;
+
+    /** How long a tree that ignored end-of-file gets between SIGTERM and SIGKILL. */
+    public static final Duration STOP_GRACE = Duration.ofSeconds(2);
 
     // Sketerm gives its browser helper up to four seconds to exit cleanly and another two after
     // SIGTERM. Stay beyond that window so profile cookies flush before force becomes necessary.
     private static final long DEFAULT_CLOSE_TIMEOUT_MS = 10_000;
     private static final long DIAGNOSTIC_GRACE_MS = 500;
+    private static final int STDERR_BYTES = 64 * 1024;
 
     private final List<String> command;
-    private final Process process;
+    private final RunningProcess process;
     private final BufferedWriter stdin;
     private final BufferedReader stdout;
-    private final JobRunner jobRunner;
-    private final Deque<String> stderrRing = new ArrayDeque<>();
-    private final CountDownLatch stderrDrained = new CountDownLatch(1);
-    private final Thread shutdownHook;
 
     private volatile boolean closed;
 
-    private SketermProcess(List<String> command, Process process) {
+    private SketermProcess(List<String> command, RunningProcess process) {
 
         this.command = List.copyOf(command);
         this.process = process;
 
-        this.stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
-        this.stdout = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-
-        this.jobRunner = JobRunner.create("sketerm-process");
-        this.jobRunner.startThread(this::pumpStderr);
-
-        this.shutdownHook = new Thread(process::destroyForcibly, "sketerm-process-reaper");
-        Runtime.getRuntime().addShutdownHook(this.shutdownHook);
+        this.stdin = new BufferedWriter(new OutputStreamWriter(process.stdin(), StandardCharsets.UTF_8));
+        this.stdout = new BufferedReader(new InputStreamReader(process.stdout(), StandardCharsets.UTF_8));
     }
 
     /**
@@ -75,28 +80,25 @@ public final class SketermProcess implements AutoCloseable {
             throw new SketermProcessException("Cannot start a process without a command");
         }
 
-        ProcessBuilder builder = new ProcessBuilder(new ArrayList<>(command));
-        builder.redirectErrorStream(false);
+        Subprocess subprocess = Subprocess.of(new ArrayList<>(command))
+                .stdinPipe()
+                .streamStdout()
+                .stderrLimit(STDERR_BYTES)
+                .stopGrace(STOP_GRACE);
 
         if (workingDirectory != null) {
-            builder.directory(workingDirectory);
+            subprocess.directory(workingDirectory.toPath());
         }
 
         if (environmentOverrides != null) {
-            Map<String, String> environment = builder.environment();
-
             for (Map.Entry<String, String> entry : environmentOverrides.entrySet()) {
-                if (entry.getValue() == null) {
-                    environment.remove(entry.getKey());
-                } else {
-                    environment.put(entry.getKey(), entry.getValue());
-                }
+                subprocess.environment(entry.getKey(), entry.getValue());
             }
         }
 
         try {
-            return new SketermProcess(command, builder.start());
-        } catch (IOException e) {
+            return new SketermProcess(command, subprocess.start());
+        } catch (SubprocessException e) {
             throw new SketermProcessException("Failed to start " + String.join(" ", command), e);
         }
     }
@@ -110,10 +112,24 @@ public final class SketermProcess implements AutoCloseable {
     }
 
     /**
-     * @return the child's exit code, or null while it is still running
+     * @return the child's pid
+     */
+    public long pid() {
+        return this.process.pid();
+    }
+
+    /**
+     * @return the child's exit code, or null while it is still running or its outcome is still settling
      */
     public Integer getExitCode() {
-        return this.process.isAlive() ? null : this.process.exitValue();
+
+        if (this.process.isAlive()) {
+            return null;
+        }
+
+        ProcessOutcome outcome = this.outcomeWithin(DIAGNOSTIC_GRACE_MS);
+
+        return outcome == null ? null : outcome.exitCode();
     }
 
     public BufferedWriter getStdin() {
@@ -125,36 +141,28 @@ public final class SketermProcess implements AutoCloseable {
     }
 
     /**
-     * @return the most recent stderr lines, oldest first
+     * @return the most recent stderr lines, oldest first, at most {@link #STDERR_RING_SIZE}
      */
     public List<String> getStderrTail() {
-        synchronized (this.stderrRing) {
-            return new ArrayList<>(this.stderrRing);
-        }
+        return tailLines(this.process.stderrSoFar());
     }
 
     /**
      * A single-string description of how the child is doing, suitable for appending to any failure.
      *
-     * A dying child races its own diagnostics, so this waits briefly for the exit status and for
-     * the stderr pump to finish rather than reporting "still running" a millisecond too early.
+     * A dying child races its own diagnostics, so this waits briefly for its outcome (stderr
+     * fully drained) rather than reporting "still running" a millisecond too early.
      */
     public String describeFailureContext() {
 
-        try {
-            this.process.waitFor(DIAGNOSTIC_GRACE_MS, TimeUnit.MILLISECONDS);
-            this.stderrDrained.await(DIAGNOSTIC_GRACE_MS, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        ProcessOutcome outcome = this.outcomeWithin(DIAGNOSTIC_GRACE_MS);
 
         StringBuilder builder = new StringBuilder();
-        Integer exit = this.getExitCode();
 
         builder.append("process ").append(String.join(" ", this.command));
-        builder.append(exit == null ? " is still running" : " exited with code " + exit);
+        builder.append(outcome == null ? " is still running" : " exited with code " + outcome.exitCode());
 
-        List<String> tail = this.getStderrTail();
+        List<String> tail = outcome == null ? this.getStderrTail() : tailLines(outcome.stderr());
 
         if (!tail.isEmpty()) {
             builder.append("; stderr tail:\n").append(String.join("\n", tail));
@@ -166,7 +174,7 @@ public final class SketermProcess implements AutoCloseable {
     }
 
     /**
-     * Close stdin, then destroy, wait, and finally force-kill.
+     * Send end-of-file, wait for the child to leave, and stop its tree when it does not.
      */
     @Override
     public void close() {
@@ -174,7 +182,7 @@ public final class SketermProcess implements AutoCloseable {
     }
 
     /**
-     * @param timeoutMs how long a SIGTERM'ed child gets before destroyForcibly
+     * @param timeoutMs how long the child gets to exit on end-of-file before its tree is stopped
      */
     public void close(long timeoutMs) {
 
@@ -190,31 +198,12 @@ public final class SketermProcess implements AutoCloseable {
             // The child may already be gone; nothing to salvage.
         }
 
-        this.process.destroy();
-
-        try {
-            if (!this.process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
-                this.process.destroyForcibly();
-                this.process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
-            }
-        } catch (InterruptedException e) {
-            this.process.destroyForcibly();
-            Thread.currentThread().interrupt();
+        if (this.process.isAlive()) {
+            this.outcomeWithin(timeoutMs);
         }
 
-        this.jobRunner.shutdownNow();
-
-        try {
-            this.stdout.close();
-        } catch (IOException ignored) {
-            // Same as stdin.
-        }
-
-        try {
-            Runtime.getRuntime().removeShutdownHook(this.shutdownHook);
-        } catch (IllegalStateException ignored) {
-            // The JVM is already shutting down; the hook is running or ran.
-        }
+        // Stops the tree when the child is still running, releases stdout and waits for the outcome.
+        this.process.close();
     }
 
     /**
@@ -235,26 +224,43 @@ public final class SketermProcess implements AutoCloseable {
         return result;
     }
 
-    private void pumpStderr() {
-
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(this.process.getErrorStream(), StandardCharsets.UTF_8))) {
-
-            String line;
-
-            while ((line = reader.readLine()) != null) {
-                synchronized (this.stderrRing) {
-                    this.stderrRing.addLast(line);
-
-                    while (this.stderrRing.size() > STDERR_RING_SIZE) {
-                        this.stderrRing.removeFirst();
-                    }
-                }
-            }
-        } catch (IOException ignored) {
-            // The stream dies with the process; the ring keeps whatever arrived.
-        } finally {
-            this.stderrDrained.countDown();
+    /**
+     * @return the outcome when it arrives within the wait, else null
+     */
+    private ProcessOutcome outcomeWithin(long millis) {
+        try {
+            return this.process.await(Duration.ofMillis(millis));
+        } catch (TimeoutException stillRunning) {
+            return null;
+        } catch (CompletionException interrupted) {
+            return null;
         }
+    }
+
+    /**
+     * @return the complete lines of a stderr capture, its newest {@link #STDERR_RING_SIZE}; a line the
+     *         byte cap cut at its start is dropped
+     */
+    private static List<String> tailLines(CapturedOutput stderr) {
+
+        String text = stderr.text();
+
+        if (text.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> lines = new ArrayList<>(Arrays.asList(text.split("\r?\n", -1)));
+
+        if (lines.get(lines.size() - 1).isEmpty()) {
+            lines.remove(lines.size() - 1);
+        }
+
+        if (stderr.truncated() && !lines.isEmpty()) {
+            lines.remove(0);
+        }
+
+        int from = Math.max(0, lines.size() - STDERR_RING_SIZE);
+
+        return List.copyOf(lines.subList(from, lines.size()));
     }
 }

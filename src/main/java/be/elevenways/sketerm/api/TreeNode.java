@@ -15,4 +15,11 @@ public record TreeNode(int id, String role, String name, int depth, String marke
     public boolean nameContains(String text) {
         return this.name != null && TreeText.containsIgnoreCase(this.name, text);
     }
+
+    /**
+     * @return whether the node's name is the text, ignoring case
+     */
+    public boolean nameEquals(String text) {
+        return this.name != null && this.name.equalsIgnoreCase(text);
+    }
 }

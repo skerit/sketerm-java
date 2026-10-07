@@ -6,6 +6,8 @@ import be.elevenways.sketerm.mcp.ToolResult;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -19,6 +21,8 @@ final class ToolCalls {
 
     private final McpSession session;
     private final Duration defaultTimeout;
+    private final List<PageStream> streams = new ArrayList<>();
+    private boolean streamsClosed;
 
     ToolCalls(McpSession session, Duration defaultTimeout) {
         this.session = session;
@@ -31,6 +35,33 @@ final class ToolCalls {
 
     Duration defaultTimeout() {
         return this.defaultTimeout;
+    }
+
+    synchronized void ownStream(PageStream stream) {
+        if (this.streamsClosed) throw new IllegalStateException("Sketerm is closed");
+        if (stream.isClosed()) throw new IllegalStateException("Page stream is closed");
+        this.streams.add(stream);
+        // Start under the same admission lock that shutdown uses; never wait for the reader here.
+        try {
+            stream.start();
+        } catch (RuntimeException | Error failure) {
+            this.streams.remove(stream);
+            throw failure;
+        }
+    }
+
+    synchronized void releaseStream(PageStream stream) {
+        this.streams.remove(stream);
+    }
+
+    void closeStreams() {
+        List<PageStream> owned;
+        synchronized (this) {
+            this.streamsClosed = true;
+            owned = List.copyOf(this.streams);
+            this.streams.clear();
+        }
+        for (PageStream stream : owned) stream.close();
     }
 
     /**

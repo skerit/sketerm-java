@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -16,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,17 +46,164 @@ class PageApiIT {
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(60);
     private static final long RUN_ID = ProcessHandle.current().pid();
 
-    private static Path server;
-    private static Path helper;
+    static Path server;
+    static Path helper;
+    private static @Nullable Path mux;
 
     @BeforeAll
     static void copyBinaries() throws IOException {
 
-        Path source = Path.of(System.getProperty("user.dir")).getParent().resolve("sketerm/zig-out/bin");
+        Path source = checkoutBinaries();
         Path target = Path.of(System.getProperty("user.dir"), "build", "it-bin");
+        boolean sourcePresent = Files.exists(source.resolve("sketerm"))
+                || Files.exists(source.resolve("sketerm-webengine")) || Files.exists(source.resolve("sketerm-mux"));
 
         server = copy(source.resolve("sketerm"), target.resolve("sketerm"));
         helper = copy(source.resolve("sketerm-webengine"), target.resolve("sketerm-webengine"));
+        mux = copy(source.resolve("sketerm-mux"), target.resolve("sketerm-mux"));
+        if (sourcePresent) {
+            assertNotNull(server, "partial source build: missing or non-executable " + source.resolve("sketerm"));
+            assertNotNull(helper,
+                    "partial source build: missing or non-executable " + source.resolve("sketerm-webengine"));
+            assertNotNull(mux, "partial source build: missing or non-executable " + source.resolve("sketerm-mux"));
+            return;
+        }
+
+        // Without a built sibling checkout, an installed Sketerm (a package swaps it only on upgrade) is the next one.
+        if (server == null && helper == null && mux == null) {
+            Path installed = onPath("sketerm");
+            Path installedHelper = installed == null ? null : installed.resolveSibling("sketerm-webengine");
+            Path installedMux = installed == null ? null : installed.resolveSibling("sketerm-mux");
+
+            if (installedHelper != null && Files.isExecutable(installedHelper) && Files.isExecutable(installedMux)) {
+                server = installed;
+                helper = installedHelper;
+                mux = installedMux;
+            }
+        }
+    }
+
+    /**
+     * The freshly built binaries: -Dsketerm.it.bin names another build's zig-out/bin (a checkout outside the
+     * workspace, a branch under test), otherwise the sibling checkout's.
+     */
+    static Path checkoutBinaries() {
+
+        String override = System.getProperty("sketerm.it.bin");
+
+        return override != null && !override.isBlank() ? Path.of(override)
+                : Path.of(System.getProperty("user.dir")).getParent().resolve("sketerm/zig-out/bin");
+    }
+
+    /**
+     * @return the executable a bare name runs, or null when no PATH entry holds it
+     */
+    private static Path onPath(String name) {
+
+        String path = System.getenv("PATH");
+
+        if (path == null) {
+            return null;
+        }
+
+        for (String entry : path.split(File.pathSeparator)) {
+            if (!entry.isEmpty()) {
+                Path candidate = Path.of(entry, name);
+                if (Files.isExecutable(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    @Test
+    @DisplayName("A real view takes trusted keys, resizes in place, mirrors its console and reviews its document")
+    void reviewJourney() throws IOException {
+
+        assumeTrue(server != null, "no sketerm binary: build the sibling checkout or install sketerm");
+        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+
+        try (Sketerm sketerm = Sketerm.launch(options("review").build())) {
+
+            Page page = sketerm.browser().openPage(REVIEW_PAGE, OpenOptions.ephemeralIdentity().withViewport(1024, 768));
+
+            // 1. Two trusted Tabs move focus past the link onto the button, as a keyboard user's would
+            KeyResult keys = page.key("Tab Tab");
+            assertEquals(2, keys.count(), "step 1: both chords were sent");
+            assertTrue(keys.delta() != null && keys.delta().contains("button \"Press\" states=(focused)"),
+                    "step 1: the button holds focus afterwards: " + keys.delta());
+
+            // 2. The viewport shrinks in place to a phone width
+            Viewport viewport = page.resize(375, 700);
+            assertEquals(new Viewport(375, 700), viewport, "step 2: the server applied the size");
+
+            // 3. The console mirror holds what the page logged, oldest first
+            ConsoleLog console = page.console();
+            assertTrue(console.lines().size() >= 2, "step 3: both lines are mirrored: " + console);
+            assertEquals("log", console.lines().get(0).level(), "step 3: the first is a log");
+            assertEquals("hello from page", console.lines().get(0).text(), "step 3: verbatim");
+            assertEquals("warn", console.lines().get(1).level(), "step 3: the second a warning");
+            assertTrue(page.console(console.lastId(), null).lines().isEmpty(), "step 3: nothing newer");
+
+            // 4. The review sees the new viewport, the focused button and the named controls
+            Inspection inspection = page.inspect();
+            assertEquals(375, inspection.viewportWidth(), "step 4: measured at the resized width");
+            assertNotNull(inspection.focus(), "step 4: something holds focus");
+            Inspection.Element focused = inspection.element(inspection.focus());
+            assertEquals("button", focused.role(), "step 4: the button holds it");
+            assertEquals("Press", focused.name(), "step 4: by its accessible name");
+            assertTrue(inspection.controls().size() >= 3, "step 4: link, button and textbox are controls");
+            assertNotNull(inspection.coverage(), "step 4: the review states its own coverage");
+        }
+    }
+
+    @Test
+    @DisplayName("A real view is driven by hand and watched through its frame stream")
+    void handJourney() throws IOException {
+
+        assumeTrue(server != null, "no sketerm binary: build the sibling checkout or install sketerm");
+        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+
+        try (Sketerm sketerm = Sketerm.launch(options("hand").build())) {
+
+            assumeTrue(sketerm.browser().supportsInput() && sketerm.browser().supportsFrames(),
+                    "this sketerm predates web_input and web_frame");
+            Page page = sketerm.browser().openPage(HAND_PAGE, OpenOptions.ephemeralIdentity().withViewport(800, 600));
+
+            // 1. The first frame is a JPEG of the 800x600 viewport
+            Frame first = page.frame(0, Duration.ofSeconds(5));
+            assertFalse(first.unchanged(), "step 1: a painted frame");
+            assertEquals(800, first.viewportWidth(), "step 1: the viewport input coordinates use");
+            assertEquals(0xff, first.bytes()[0] & 0xff, "step 1: a JPEG stream (SOI)");
+            assertEquals(0xd8, first.bytes()[1] & 0xff, "step 1: a JPEG stream (SOI)");
+
+            // 2. A trusted shift-click on the pad: the page sees it, then the release of Shift
+            InputResult sent = page.input(InputEvent.keyDown("Shift"),
+                    InputEvent.down(50, 40, MouseButton.LEFT, InputModifier.SHIFT),
+                    InputEvent.up(50, 40, MouseButton.LEFT, InputModifier.SHIFT),
+                    InputEvent.keyUp("Shift"));
+            assertEquals(4, sent.sent(), "step 2: every edge went out");
+            page.waitFor(WaitFor.TITLE, "up", Duration.ofSeconds(5));
+            assertEquals("down 50,40 shift trusted up", page.evaluate("document.title"),
+                    "step 2: a trusted shift-click at the point");
+
+            // 3. Text lands in the field a click focused
+            List<InputEvent> typing = new ArrayList<>(InputEvent.click(100, 165));
+            typing.add(InputEvent.text("hallo"));
+            page.input(typing);
+            String value = "";
+            for (int attempt = 0; attempt < 40 && !"hallo".equals(value); attempt++) {
+                value = String.valueOf(page.evaluate("document.getElementById('field').value"));
+            }
+            assertEquals("hallo", value, "step 3: the text reached the focused field");
+
+            // 4. The click repainted the pad, so a frame newer than the first arrives
+            Frame after = page.frame(first.serial(), FrameFormat.PNG, null, null, Duration.ofSeconds(3));
+            assertFalse(after.unchanged(), "step 4: a newer paint");
+            assertTrue(after.serial() != first.serial(), "step 4: under a new serial");
+        }
     }
 
     @Test
@@ -650,9 +799,27 @@ class PageApiIT {
                 .defaultTimeout(CALL_TIMEOUT)
                 .env(clearedSketermEnvironment())
                 .env("SKETERM_WEB_BIN", helper.toString())
+                .env("SKETERM_MUX_BIN", mux.toString())
                 .env("XDG_RUNTIME_DIR", RUNTIME_DIR)
                 .env("XDG_STATE_HOME", state.toString());
     }
+
+    private static final String HAND_PAGE = "data:text/html,"
+            + "<html><head><title>hand</title></head><body style=\"margin:0\">"
+            + "<div id=pad style=\"position:fixed;left:0;top:0;width:200px;height:100px;background:%2300ff00\"></div>"
+            + "<input id=field style=\"position:fixed;left:0;top:150px;width:200px;height:30px\"><script>"
+            + "const pad=document.getElementById('pad');"
+            + "pad.addEventListener('pointerdown',e=>{document.title='down '+e.clientX+','+e.clientY"
+            + "+(e.shiftKey?' shift':'')+(e.isTrusted?' trusted':'');pad.style.background='red'});"
+            + "pad.addEventListener('pointerup',()=>{document.title+=' up'});"
+            + "</script></body></html>";
+
+    private static final String REVIEW_PAGE = "data:text/html,"
+            + "<html lang=\"en\"><head><title>Review</title></head><body><main>"
+            + "<h1>Review</h1><a href=\"%23x\">First link</a><button>Press</button>"
+            + "<input aria-label=\"Name\">"
+            + "<script>console.log('hello from page'); console.warn('warned');</script>"
+            + "</main></body></html>";
 
     private static final String BUTTON_PAGE = "data:text/html,"
             + "<html><head><title>Sketerm Java IT</title></head><body>"

@@ -3,6 +3,7 @@ package be.elevenways.sketerm.api;
 import be.elevenways.sketerm.mcp.McpSession;
 import be.elevenways.sketerm.process.SketermProcess;
 import be.elevenways.sketerm.rpc.JsonRpcConnection;
+import be.elevenways.sketerm.rpc.SketermTransport;
 import be.elevenways.sketerm.rpc.StdioTransport;
 
 import java.time.Duration;
@@ -71,6 +72,30 @@ public final class Sketerm implements AutoCloseable {
         }
     }
 
+    /**
+     * Complete the MCP handshake over a transport someone else opened: a scripted server in a test,
+     * or a future non-stdio transport. {@link #process()} is then null; closing closes the transport.
+     *
+     * @throws be.elevenways.sketerm.mcp.McpException when the handshake fails
+     */
+    public static Sketerm connect(SketermOptions options, SketermTransport transport) {
+
+        JsonRpcConnection connection = new JsonRpcConnection(transport);
+
+        Duration timeout = options.defaultTimeout();
+
+        if (timeout != null) {
+            connection.setTimeoutMs(timeout.toMillis());
+        }
+
+        try {
+            return new Sketerm(options, null, connection, McpSession.initialize(connection));
+        } catch (RuntimeException e) {
+            connection.close();
+            throw e;
+        }
+    }
+
     public SketermOptions options() {
         return this.options;
     }
@@ -93,6 +118,9 @@ public final class Sketerm implements AutoCloseable {
         return this.connection;
     }
 
+    /**
+     * @return the child process, or null for a server reached through {@link #connect}
+     */
     public SketermProcess process() {
         return this.process;
     }
@@ -122,6 +150,7 @@ public final class Sketerm implements AutoCloseable {
         }
 
         this.closed = true;
+        this.calls.closeStreams();
         this.session.close();
     }
 }

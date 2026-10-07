@@ -19,6 +19,7 @@ import java.time.Duration;
  *                only, and fail-closed - a helper that cannot capture opens nothing
  * @param route null uses direct; otherwise direct, tor, via:host or on:host (backend permitting)
  * @param colorScheme headless preferred colour scheme, installed before the first document; null keeps defaults
+ * @param maxFps headless CEF paint cap from 1 to 240; null keeps the server's default
  */
 public record OpenOptions(Integer width,
                           Integer height,
@@ -28,7 +29,16 @@ public record OpenOptions(Integer width,
                           NetworkPolicy policy,
                           CaptureFilter capture,
                           String route,
-                          ColorScheme colorScheme) {
+                          ColorScheme colorScheme,
+                          Integer maxFps) {
+
+    public static final int MAX_FPS = 240;
+
+    /** Existing callers leave the headless frame-rate cap at the server's default. */
+    public OpenOptions(Integer width, Integer height, Duration timeout, String profile, boolean ephemeral,
+                       NetworkPolicy policy, CaptureFilter capture, String route, ColorScheme colorScheme) {
+        this(width, height, timeout, profile, ephemeral, policy, capture, route, colorScheme, null);
+    }
 
     /** Backward-compatible constructor with direct routing and default colours. */
     public OpenOptions(Integer width, Integer height, Duration timeout, String profile,
@@ -43,6 +53,7 @@ public record OpenOptions(Integer width,
     }
 
     public OpenOptions {
+        requireMaxFps(maxFps, "web_open");
 
         if (profile != null) {
 
@@ -126,12 +137,12 @@ public record OpenOptions(Integer width,
 
     public OpenOptions withViewport(int width, int height) {
         return new OpenOptions(width, height, this.timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, this.route, this.colorScheme);
+                this.capture, this.route, this.colorScheme, this.maxFps);
     }
 
     public OpenOptions withTimeout(Duration timeout) {
         return new OpenOptions(this.width, this.height, timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, this.route, this.colorScheme);
+                this.capture, this.route, this.colorScheme, this.maxFps);
     }
 
     /**
@@ -139,7 +150,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withPolicy(NetworkPolicy policy) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, policy,
-                this.capture, this.route, this.colorScheme);
+                this.capture, this.route, this.colorScheme, this.maxFps);
     }
 
     /**
@@ -147,7 +158,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions capturing(CaptureFilter capture) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
-                capture, this.route, this.colorScheme);
+                capture, this.route, this.colorScheme, this.maxFps);
     }
 
     /**
@@ -156,7 +167,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withProfile(String profile) {
         return new OpenOptions(this.width, this.height, this.timeout, profile, this.ephemeral, this.policy,
-                this.capture, this.route, this.colorScheme);
+                this.capture, this.route, this.colorScheme, this.maxFps);
     }
 
     /**
@@ -164,7 +175,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withEphemeral() {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, true, this.policy,
-                this.capture, this.route, this.colorScheme);
+                this.capture, this.route, this.colorScheme, this.maxFps);
     }
 
     /**
@@ -172,13 +183,13 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withDefaultIdentity() {
         return new OpenOptions(this.width, this.height, this.timeout, null, false, this.policy,
-                this.capture, this.route, this.colorScheme);
+                this.capture, this.route, this.colorScheme, this.maxFps);
     }
 
     /** Select a network route; untrusted policies accept direct only. */
     public OpenOptions withRoute(String route) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, route, this.colorScheme);
+                this.capture, route, this.colorScheme, this.maxFps);
     }
 
     /**
@@ -187,6 +198,18 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withColorScheme(ColorScheme colorScheme) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, this.route, colorScheme);
+                this.capture, this.route, colorScheme, this.maxFps);
+    }
+
+    /** Null preserves the server's headless default; explicit caps require capability support. */
+    public OpenOptions withMaxFps(Integer maxFps) {
+        return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
+                this.capture, this.route, this.colorScheme, maxFps);
+    }
+
+    static void requireMaxFps(Integer maxFps, String tool) {
+        if (maxFps != null && (maxFps < 1 || maxFps > MAX_FPS)) {
+            throw new InvalidArgsException("max_fps must be from 1 to " + MAX_FPS, tool, false, null);
+        }
     }
 }

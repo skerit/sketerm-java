@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -346,6 +347,100 @@ class PageApiTest {
         assertTrue(page.isPolicyExhausted(), "refresh() must not clear a latched exhaustion");
         assertEquals(DenialReason.BYTE_CAP, page.policyExhaustedReason(),
                 "the reason from the earlier answer is kept, since latching is permanent per view");
+    }
+
+    @Test
+    @DisplayName("Keys, a resize, the console and a review each name the view and decode their answer")
+    void reviewToolsJourney() {
+
+        FakeSketermServer server = new FakeSketermServer();
+
+        server.on("web_open", facts(map("view", 4, "settled", true, "document", 1, "revision", 1,
+                "snapshot", TREE)));
+        server.on("web_key", facts(map("keys", "Tab Tab", "count", 2, "loading_after", false,
+                "delta_kind", "delta", "delta", "delta rev 1->2\n  [3] button \"Press Me\" (focused)\n")));
+        server.on("web_resize", facts(map("width", 375, "height", 700)));
+        server.on("web_console", facts(map("count", 3, "dropped", 1, "last_id", 4,
+                "lines", "[2] log: hello\n[3] error: Uncaught Error: boom\n    at app.js:1\n[4] warn: careful\n")));
+        server.on("web_inspect", map("captured_at_ms", 1700, "inspection", map(
+                "document_id", "abc", "url", "https://example.test/", "viewport", map("width", 375, "height", 700),
+                "elements", List.of(
+                        map("ref", 1, "tag", "button", "role", "button", "name", "Press Me",
+                                "attributes", map("aria-expanded", "false"), "focusable", true),
+                        map("ref", 2, "tag", "div", "role", "", "name", "", "dom_id", "menu",
+                                "attributes", map(), "focusable", false)),
+                "focus", 1, "landmarks", List.of(), "controls", List.of(1),
+                "issues", List.of(map("kind", "disclosure_mismatch", "element", 1, "related", 2)),
+                "document_overflow", 12, "truncated", false,
+                "page_errors", List.of(map("id", 1, "kind", "uncaught_exception", "message", "boom")),
+                "errors_dropped", 0, "coverage", "main document"),
+                "console_errors", List.of(map("id", 3, "kind", "error", "message", "Uncaught Error: boom"))));
+
+        Page page = server.browser().openPage("https://example.test/");
+
+        // 1. Keys travel as one chord string and the delta comes back as the server wrote it
+        KeyResult keys = page.key("Tab Tab");
+        assertEquals("Tab Tab", server.lastArguments("web_key").get("keys"), "step 1: the chords as given");
+        assertEquals(4, argInt(server, "web_key", "pane"), "step 1: the view's own handle");
+        assertEquals(2, keys.count(), "step 1: both chords counted");
+        assertTrue(keys.delta().contains("(focused)"), "step 1: the follow-up delta");
+        assertThrows(IllegalArgumentException.class, () -> page.key(" "), "step 1: no chord is refused locally");
+
+        // 2. A resize names both sides and answers with the applied viewport
+        assertEquals(new Viewport(375, 700), page.resize(375, 700), "step 2: the applied size");
+        assertEquals(375, argInt(server, "web_resize", "width"), "step 2: the width went out");
+
+        // 3. Console lines split on their heads; a continuation stays with its message
+        ConsoleLog console = page.console(1, 50);
+        assertEquals(1L, ((Number) server.lastArguments("web_console").get("since")).longValue(), "step 3: cursor");
+        assertEquals(50, argInt(server, "web_console", "max"), "step 3: cap");
+        assertEquals(3, console.lines().size(), "step 3: three messages");
+        assertEquals(new ConsoleLog.Line(3, "error", "Uncaught Error: boom\n    at app.js:1"),
+                console.lines().get(1), "step 3: the stack line belongs to its error");
+        assertEquals(4L, console.lastId(), "step 3: the next cursor");
+        assertEquals(1L, console.dropped(), "step 3: what the mirror lost");
+
+        // 4. The review decodes its element table, the finding and both error lanes
+        Inspection inspection = page.inspect("main");
+        assertEquals("main", server.lastArguments("web_inspect").get("selector"), "step 4: narrowed");
+        assertEquals("Press Me", inspection.element(inspection.focus()).name(), "step 4: the focused element");
+        assertEquals("menu", inspection.element(2).domId(), "step 4: the dom id");
+        assertEquals("false", inspection.element(1).attributes().get("aria-expanded"), "step 4: attributes");
+        assertEquals(new Inspection.Issue("disclosure_mismatch", 1, 2, null), inspection.issues().get(0),
+                "step 4: the finding names both elements");
+        assertEquals(12, inspection.documentOverflow(), "step 4: horizontal overflow");
+        assertEquals("boom", inspection.pageErrors().get(0).message(), "step 4: page errors");
+        assertEquals("error", inspection.consoleErrors().get(0).kind(), "step 4: console errors");
+    }
+
+    @Test
+    void headlessFrameRateOptionsValidatePreserveAndFailClosed() {
+        FakeSketermServer server = new FakeSketermServer();
+        server.on("capabilities", map("web_max_fps", true));
+        server.on("web_close", arguments -> map("backend", "headless", "closed", arguments.get("pane"),
+                "remaining", 0, "current", 0));
+        OpenOptions options = OpenOptions.viewport(640, 480).withMaxFps(15)
+                .withTimeout(Duration.ofSeconds(5)).withEphemeral().withRoute("direct")
+                .withColorScheme(ColorScheme.LIGHT).withViewport(800, 600);
+        assertEquals(15, options.maxFps(), "step 1: fluent options preserve the cap");
+        assertNull(options.withMaxFps(null).maxFps(), "step 1: null restores the server default");
+        for (int invalid : List.of(0, -1, OpenOptions.MAX_FPS + 1))
+            assertThrows(InvalidArgsException.class, () -> options.withMaxFps(invalid));
+        server.on("web_open", facts(map("view", 7, "settled", true, "snapshot", TREE,
+                "document", 1, "revision", 1, "max_fps", 15, "color_scheme", "light")));
+        Browser browser = server.browser();
+        Page page = browser.openPage("https://example.test/", options);
+        assertEquals(15, argInt(server, "web_open", "max_fps"), "step 2: the option reaches MCP");
+        page.close();
+        server.on("web_open", facts(map("view", 8, "settled", true, "snapshot", TREE,
+                "document", 1, "revision", 1, "color_scheme", "light")));
+        assertThrows(ProtocolMismatchException.class, () -> browser.openPage("https://example.test/", options),
+                "step 3: an ignored cap fails closed and closes the returned handle");
+        assertEquals(8, argInt(server, "web_close", "pane"));
+        server.on("capabilities", map("web_max_fps", false));
+        int sent = server.callsTo("web_open").size();
+        assertThrows(UnavailableException.class, () -> browser.openPage("https://example.test/", options));
+        assertEquals(sent, server.callsTo("web_open").size(), "step 4: an unsupported server opens nothing");
     }
 
     private static int argInt(FakeSketermServer server, String tool, String key) {

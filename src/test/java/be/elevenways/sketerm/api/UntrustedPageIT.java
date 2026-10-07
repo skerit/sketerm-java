@@ -33,9 +33,8 @@ class UntrustedPageIT {
 
     @Test
     void localHttpWorksButWebSocketAndWebRtcCannotReachOurServers() throws Exception {
-        Path binaries = Path.of("build", "it-bin");
-        assumeTrue(Files.isExecutable(binaries.resolve("sketerm"))
-                && Files.isExecutable(binaries.resolve("sketerm-webengine")), "headless binaries not built");
+        // PageApiIT's binaries: the sibling checkout's copies, or the installed Sketerm when that is not built.
+        assumeTrue(PageApiIT.server != null && PageApiIT.helper != null, "no headless sketerm binaries");
         // Chromium's private root/socket path has a strict length bound and requires private parents.
         Path runtime = Files.createTempDirectory(Path.of("/tmp"), "sju",
                 PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.condition.OS;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -74,6 +75,28 @@ class StdioSubprocessTest {
 
         assertFalse(process.isAlive(), "the child was force-killed");
         assertTrue(elapsed < 5_000, "close did not hang, it took " + elapsed + "ms");
+    }
+
+    @Test
+    @DisplayName("Closing a child that outlives end-of-file stops its descendants too")
+    void closeStopsTheWholeTree() throws Exception {
+
+        // The shell starts a long sleep, names its pid on stdout and waits for it; end-of-file ends neither.
+        String script = "sleep 300 & echo $!; wait";
+
+        SketermProcess process = SketermProcess.start(List.of("sh", "-c", script), null, null);
+        long grandchildPid = Long.parseLong(process.getStdout().readLine().trim());
+        ProcessHandle grandchild = ProcessHandle.of(grandchildPid).orElseThrow();
+
+        // 1. The descendant runs while its parent does
+        assertTrue(grandchild.isAlive(), "step 1: the descendant started");
+
+        // 2. Closing gives up waiting on end-of-file and stops the tree, the descendant included
+        process.close(300);
+
+        assertFalse(process.isAlive(), "step 2: the child is reaped");
+        grandchild.onExit().get(5, TimeUnit.SECONDS);
+        assertFalse(grandchild.isAlive(), "step 2: the descendant was stopped with it");
     }
 
     @Test

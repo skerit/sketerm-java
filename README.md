@@ -13,7 +13,7 @@ Each layer knows only the one below it, so a future HTTP transport is a swap and
 | Package | Responsibility |
 | --- | --- |
 | `json` | `Json`, a facade over one shared `Dry`: `parseObject`, an NDJSON-safe `write`, and typed getters that fail with the offending key named |
-| `process` | `SketermProcess`: argv/cwd/env, UTF-8 line streams, a 200-line stderr ring for diagnostics, `close()` = close stdin, destroy, wait, force-kill, plus a shutdown hook so a crashed JVM never orphans a browser |
+| `process` | `SketermProcess`: argv/cwd/env, UTF-8 line streams and a 200-line stderr tail, supervised by protoblast's `Subprocess`. `close()` sends end-of-file (Sketerm then stops its own helpers and flushes profile cookies), waits up to the close timeout, and only then stops the WHOLE process tree (SIGTERM, SIGKILL after `STOP_GRACE`); a crashed JVM never orphans a browser |
 | `rpc` | `SketermTransport` (the seam), `StdioTransport` (newline framing), `JsonRpcConnection` (id correlation, per-call timeouts, EOF drains every pending call with the child's exit code and stderr tail) |
 | `mcp` | `McpSession` (initialize, tools/list, tools/call, ping), `ToolDescriptor`, `ToolResult`, `Content`, `ToolException` |
 | `api` | The Playwright-SHAPED synchronous face over the browser tool group: `Sketerm`, `Browser`, `Page`, `Snapshot`/`Ref`, `NetworkPolicy`/`PolicyStatus`, `Evidence`, and one typed exception per error code |
@@ -87,8 +87,133 @@ try (Sketerm sketerm = Sketerm.launch(options)) {
 }
 ```
 
+`Sketerm.connect(options, transport)` completes the same handshake over a transport someone else
+opened (a scripted server in a test, a future non-stdio transport); its `process()` is then null.
+`browser().isAvailable()` reads the `capabilities` report's `web` flag: whether this server can run
+the web tools at all, the preflight before opening anything. `browser().isHeadless()` says whether they
+drive the server's own headless helper rather than a GUI the user owns (the `web_gui` grant, where
+policies, profiles and capture are refused); a server that must never touch the user's browser
+launches with `SKETERM_MCP_WEB_GUI=0`, which overrides a config grant.
+
+### Review tools
+
+Four more page methods cover the reads and inputs an accessibility or layout review needs:
+
+```java
+KeyResult keys = page.key("Tab Tab Enter");           // TRUSTED key chords, the path a keystroke rides
+Viewport size = page.resize(390, 844);                // in place; 320-3840 by 240-2160 logical pixels
+ConsoleLog log = page.console();                      // every console line still held for the view
+ConsoleLog newer = page.console(log.lastId(), 50);    // only what arrived since
+Inspection review = page.inspect();                   // landmarks, focus, control names, overflow, errors
+```
+
+`key` (chords) and `act` on a `Ref` are the inputs a script normally needs. A person driving a headless
+view by hand (a remote viewer) needs raw input at coordinates and the painted frames; a Sketerm that
+advertises `web_input` and `web_frames` (`browser.supportsInput()`, `browser.supportsFrames()`) takes both:
+
+```java
+page.input(InputEvent.click(120, 80));                                // a down and an up edge at one point
+page.input(InputEvent.text("hello"), InputEvent.press("Enter"), InputEvent.wheel(400, 300, 0, 240));
+page.input(InputEvent.keyDown("Shift"), InputEvent.keyUp("Shift"));    // raw edges; a viewer releases them
+Frame frame = page.frame(0, Duration.ofSeconds(2));                   // the current paint
+Frame next = page.frame(frame.serial(), FrameFormat.JPEG, 70, 960, Duration.ofMillis(120));
+if (!next.unchanged()) show(next.bytes());                            // only a newer paint carries pixels
+```
+
+Coordinates are viewport (CSS) pixels; a frame reports its own pixel size and the viewport it shows, so a
+viewer scales its surface coordinates by the two. `input` takes at most `Page.MAX_INPUT_EVENTS` events per
+call, in order; a refused event stops the batch and the result says how many were sent. `frame` long-polls:
+it answers as soon as a paint newer than `since` exists, or `unchanged` once the timeout passes. Sketerm
+answers one call at a time, so a long frame poll delays every other call on that session.
+
 Every call names its view handle explicitly (the `pane` argument), so several pages can be driven
 from one session without the server's "current view" ever deciding for you.
+
+### Binary page streams
+
+Headless pages default to 60 FPS, or the MCP config's `web_max_fps`. Set an
+explicit per-view cap with `OpenOptions.defaults().withMaxFps(30)`, or use
+`page.stream(listener, 15)` to override an existing view at stream open.
+Caps are integers from 1 through 240 and control CEF's own paint scheduler,
+not Java callback timing. An omitted stream cap preserves the view's rate;
+a stream override remains after that stream closes. GUI monitor-driven
+pacing is unchanged. `browser.supportsMaxFps()` reads `web_max_fps`; explicit
+caps fail closed on unsupported servers/helpers, and the SDK requires the
+applied-rate echo. Other fluent open options preserve `maxFps`.
+
+Configure the server with `[mcp] web_max_fps = 30`; a selected
+`[mcp.<name>]` section can override it. `capabilities.web_default_max_fps`
+reports the resolved headless default before the helper starts.
+
+`browser.supportsStreams()` reads `capabilities.web_stream` (missing/null means false). A supported
+headless view can push raw paints through a local Unix socket independently of MCP:
+
+```java
+PageStream stream = page.stream(new PageStream.Listener() {
+    @Override
+    public void surfaceSize(PageStream stream, PageStream.SurfaceSize size) {
+        resizeSurface(size.pixelWidth(), size.pixelHeight());
+    }
+
+    @Override
+    public void damage(PageStream stream, PageStream.Damage damage) {
+        uploadPackedBgra(damage.x(), damage.y(), damage.width(), damage.height(), damage.pixels());
+    }
+
+    @Override
+    public void frameEnd(PageStream stream, PageStream.FrameEnd frame) {
+        presentSurface();
+        stream.ack(frame.serial());
+    }
+});
+stream.input(InputEvent.click(120, 80));
+stream.input(InputEvent.press("Enter"), InputEvent.text("hello"));
+stream.key(KeyAction.PRESS, KeyCode.ENTER); // protoblast's shared physical-key vocabulary
+stream.resize(640, 480);
+stream.focus();
+stream.blur();
+stream.close();
+```
+
+- `Page.stream(listener)` installs the listener before AUTH; callbacks may run before the method
+  returns and receive their stream explicitly. There is no listener-less overload that could lose
+  the initial surface or damage. Callbacks run serially on a protoblast `JobRunner` reader.
+- `Damage.pixels()` is a read-only, reusable-buffer view of exactly `width * height * 4` packed
+  BGRA-premultiplied bytes, with no stride padding; bands carry at most 1 MiB of pixel bytes.
+  Damage, cursor-image and Opus buffers are valid **only inside their callback**. Upload or copy
+  them before returning; retaining the `ByteBuffer` does not retain its contents.
+- `SurfaceSize` reports physical pixel size and logical input size separately. Pointer coordinates
+  use the logical viewport. `Cursor` carries either a UTF-8 name or a borrowed BGRA image with
+  its hotspot; cursor pixels are premultiplied like damage pixels. `Audio` carries unsigned `ptsUs` (CEF capture time in microseconds with an
+  unspecified epoch), sample rate, channel count, per-channel sample count and a borrowed Opus packet;
+  the SDK does not decode or play audio.
+- Audio normally starts at the **next audible start after stream_open**, not immediately when
+  attaching to an already-playing page; an already-active capture can be attached immediately.
+  `hasAudio()` reports stream support, not whether packets are currently arriving. CEF capture
+  diverts the page's normal audio output into the stream and cannot be switched off mid-capture;
+  it remains active until the page has been quiet for two seconds. Closing the stream is not an
+  immediate restoration of normal audio output while the page keeps playing.
+- The listener must explicitly `ack(serial)` after presenting a `FrameEnd`. ACK is cumulative
+  through that delivered serial; no automatic acknowledgement is sent. The server permits two
+  unacknowledged frames, then unions pending damage and sends the latest pixels when credit opens.
+  Java `long` preserves all unsigned serial/timestamp bits; use unsigned comparison when needed.
+- Input, resize, focus/blur and ACK use binary messages, not `web_input` or another MCP request.
+  Input remains responsive while an MCP wait is pending. `KeyAction.PRESS` sends down and up;
+  blur and disconnect release held keys/buttons at the helper. `stream.close()` closes only the
+  stream, not the Page. Page and Sketerm shutdown close their owned streams.
+- `stream.key(action, KeyCode, modifiers...)` translates supported protoblast physical key codes
+  to the helper's US-layout key names; unsupported codes are refused before sending. Use text
+  events for layout-dependent characters. Binary reading and writing use protoblast's shared
+  `BinaryReader` and `BinaryWriter`; the decoder still borrows its bounded receive buffer.
+- Text events carry at most `PageStream.MAX_TEXT` (4096) UTF-8 bytes, and raw key names at most
+  `PageStream.MAX_KEY_NAME` (64) UTF-8 bytes; these are byte limits, not Java character counts.
+  An oversized or malformed event refuses the entire input batch before its first edge is sent.
+- Stream V1 uses little-endian `u32 length` including the tag byte, capped at 4 MiB, and exactly
+  32 lowercase ASCII hex token bytes in AUTH. Unknown tags, invalid UTF-8, truncation, incorrect
+  lengths, out-of-surface damage, overflow and incompatible endpoint facts fail closed. The
+  `closed(stream, failure)` callback reports termination; `failure()` is null for orderly EOF
+  or local close. A stream socket must be reachable on the JVM's own machine; no remote socket
+  forwarding or Java-side pixel JSON encoding is implied.
 
 The first semantic snapshot is opportunistic, not the view's identity. A slow `web_open` may return
 a still-live `Page` whose `lastSnapshot()` is null; `wasOpeningSettled()` and
@@ -112,12 +237,15 @@ token fails closed rather than being folded into a neighbour.
 Failures are typed off `structuredContent.error.code` by one switch in `SketermApiException.from`:
 `InvalidArgsException`, `NotFoundException`, `UnavailableException`, `TimeoutException`,
 `RefusedException`, `ConflictException`, `IoFailedException`, `UnknownToolException`,
-`FailedException`, plus `isRetryable()` on all of them. Two more are the api layer's own:
+`FailedException`, plus `isRetryable()` on all of them. Three more are the api layer's own:
 
 - `StaleRefException` - a `Ref` from a document the page has left, refused before the call goes out,
   and also what the server's own "stale reader id" / "unknown id" refusal decodes to.
 - `ProtocolMismatchException` - the answer had no `structuredContent`, or no view handle in it. That
   is a Sketerm predating the result-shape migration, and it is named as such rather than guessed at.
+- `AmbiguousMatchException` - `Snapshot.find` matched several nodes. An exact name (ignoring case) wins over names
+  that merely contain the text, so `find("button", "Subscribe")` never lands on "Unsubscribe"; two nodes at the
+  deciding level are refused, never guessed. `matches()` lists them; act on one by its id.
 
 ### Lifecycle and browsing profiles
 
@@ -412,6 +540,49 @@ a READ tool, so a capture still works on a view whose budgets have latched - whi
 view whose evidence someone wants. A policy is attested only when one is actually installed, rather
 than recorded as a row of zeroes that would read like enforcement.
 
+## Testing without a browser
+
+The `testFixtures` artifact publishes `ScriptedSketerm`, a scripted MCP server, and `FakeTransport`.
+A consumer's tests drive the real api layer over it instead of a browser:
+
+```groovy
+testImplementation(testFixtures(libs.sketerm.java))
+```
+
+```java
+ScriptedSketerm server = ScriptedSketerm.browser()   // capable headless Sketerm: capabilities, open, tabs,
+        .on("web_read", ScriptedSketerm.map("markdown", "# Hi"));   // policy (attested), screenshot, wait
+try (Sketerm sketerm = server.connect()) {
+    Page page = sketerm.browser().openPage("https://example.com/");
+}
+assert server.callsTo("web_open").size() == 1;
+```
+
+`on` replaces a tool's answer (a map, or a function of the arguments), `onError` makes it fail with a
+typed error code, and `calls()`/`lastArguments(tool)` show what reached the server. The browser preset
+also answers `web_input` (every event repaints the view) and `web_frame` (a long poll that answers a
+`ScriptedSketerm.PIXEL_JPEG` image once the view repainted); `frameSize(w, h)` sets the frame size it
+reports against its 1280x800 viewport.
+
+The socket fixture is opt-in and publishes the same typed stream API without an engine:
+
+```java
+try (ScriptedSketerm server = ScriptedSketerm.browser().onStream(socket -> {
+    socket.surfaceSize(1, 1, 320, 240);
+    socket.damage(0, 0, 1, 1, new byte[]{0, 0, (byte) 255, (byte) 255});
+    socket.frameEnd(1);
+    // socket.receive(Duration.ofSeconds(5)) reads a binary upstream tag and body.
+}); Sketerm sketerm = server.connect()) {
+    Page page = sketerm.browser().openPage();
+    PageStream stream = page.stream(listener);
+}
+```
+
+`ScriptedPageStream` scripts named/image cursors, timed Opus packets, damage and frame ends;
+`message`/`raw` deliberately permit hostile bytes for decoder tests. Its script begins after
+AUTH, `receive(timeout)` records socket input/ACKs (never MCP calls), and `ended()` observes
+disconnect. Close the fixture as well as Sketerm to release any unauthenticated listener.
+
 ## Building
 
 ```
@@ -421,14 +592,31 @@ than recorded as a row of zeroes that would read like enforcement.
 Protoblast must be published to mavenLocal first (`zenit-dev build` in the javaweb workspace).
 `SketermSessionIT` drives the real binary and skips itself when `sketerm` is not on PATH.
 `PageApiIT` drives the whole api layer against a real headless view: it copies `sketerm` and
-`sketerm-webengine` out of the sibling checkout once, so a rebuild mid-run cannot swap the binary
+`sketerm-webengine` out of the sibling checkout once (or, when that checkout is not built, out of the
+installed `sketerm` on PATH and its `sketerm-webengine` beside it), so a rebuild mid-run cannot swap the binary
 underneath it, and skips itself when either is missing. Its second journey proves close and the
 profile lifecycle over a loopback HTTP fixture (a `data:` document carries no cookies at all in
 Chromium), under its own `XDG_STATE_HOME` and instance name so the profile store is per run; it
-skips those steps when the copied binary predates the profile tools.
+skips those steps when the copied binary predates the profile tools. Its review journey proves
+`key`, `resize`, `console` and `inspect` against the real browser; its hand journey proves `input` and
+`frame` and skips itself on a binary that does not advertise `web_input` and `web_frames`. Pass
+`-Dsketerm.it.bin=<dir>` to copy the two binaries from that directory instead (a fresh `zig-out/bin`).
 
 `UntrustedPageIT` reuses the copied binaries and controls HTTP, WebSocket and UDP/STUN listeners.
 It proves ordinary network reachability, restricted HTTP loading at a loopback-resolving
 `abc.folio.localhost:<port>`, native dark emulation, and zero WebSocket/WebRTC traffic from the
 untrusted view. Missing binaries or an absent `web_untrusted` capability skip the journey;
 startup/enforcement failures on an advertised supported build fail the test.
+
+`PageStreamTest` covers the binary decoder, borrowed-buffer reuse, exact upstream bytes, hostile
+framing/UTF-8/ranges and stream ownership through the published socket fixture. `PageStreamIT`
+copies all three freshly built binaries from the sibling checkout's `zig-out/bin` (or
+`--define sketerm.it.bin=<dir>`) into its own test directory, never falls back to installed binaries,
+and walks one real page through pixel equality with `web_screenshot`, trusted input during a pending
+MCP wait, typing and clicking with damage limited to the changed box (input-to-damage under 100ms), wheel
+scrolling, a composed `<select>` popup, a premultiplied custom cursor, an idle helper that sends nothing,
+an animation's frame rate, a stalled reader with bounded helper memory that then gets the newest pixels,
+resize, blur releasing held input, single-use tokens, decodable non-silent Opus (system libopus) and
+teardown without leaked helper descriptors or socket files. After both checkouts are ready, run the
+targeted wave through `zenit-dev test --unit --class PageStreamTest,PageStreamIT,PageApiTest
+--define sketerm.it.bin=<sketerm checkout>/zig-out/bin --skip-deps`.

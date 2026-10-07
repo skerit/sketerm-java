@@ -165,31 +165,23 @@ public final class Snapshot {
     }
 
     /**
-     * @return the first node whose name contains the text, ignoring case
+     * The one node named exactly this text (ignoring case), else the one whose name contains it.
+     *
+     * @return empty when no node's name equals or contains the text
+     * @throws AmbiguousMatchException when several nodes match at the level that decided, so none is guessed
      */
     public Optional<Ref> find(String text) {
-
-        for (TreeNode node : this.nodes()) {
-            if (node.nameContains(text)) {
-                return Optional.of(this.refTo(node));
-            }
-        }
-
-        return Optional.empty();
+        return this.match(null, text);
     }
 
     /**
-     * @return the first node with this role whose name contains the text, ignoring case
+     * The one node with this role named exactly this text (ignoring case), else the one whose name contains it.
+     *
+     * @return empty when no node with this role equals or contains the text
+     * @throws AmbiguousMatchException when several nodes match at the level that decided, so none is guessed
      */
     public Optional<Ref> find(String role, String text) {
-
-        for (TreeNode node : this.nodes()) {
-            if (role.equals(node.role()) && node.nameContains(text)) {
-                return Optional.of(this.refTo(node));
-            }
-        }
-
-        return Optional.empty();
+        return this.match(role, text);
     }
 
     /**
@@ -206,6 +198,37 @@ public final class Snapshot {
         }
 
         return List.copyOf(matches);
+    }
+
+    /**
+     * An exact name wins over names that merely contain the text, so "Subscribe" never lands on "Unsubscribe".
+     *
+     * @param role null matches every role
+     */
+    private Optional<Ref> match(String role, String text) {
+
+        List<TreeNode> exact = new ArrayList<>();
+        List<TreeNode> partial = new ArrayList<>();
+
+        for (TreeNode node : this.nodes()) {
+            if (role != null && !role.equals(node.role())) {
+                continue;
+            }
+
+            if (node.nameEquals(text)) {
+                exact.add(node);
+            } else if (node.nameContains(text)) {
+                partial.add(node);
+            }
+        }
+
+        List<TreeNode> matches = exact.isEmpty() ? partial : exact;
+
+        if (matches.size() > 1) {
+            throw new AmbiguousMatchException(role, text, matches);
+        }
+
+        return matches.isEmpty() ? Optional.empty() : Optional.of(this.refTo(matches.getFirst()));
     }
 
     @Override
