@@ -32,9 +32,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 /**
  * Drives the api layer against a real headless Sketerm, skipped when the binaries are absent.
  *
- * <p>Both the server and the browser helper are COPIED to build/it-bin once at setup: the sibling
+ * Both the server and the browser helper are COPIED to build/it-bin once at setup: the sibling
  * checkout they come from is rebuilt while this suite runs, and a binary swapped underneath a
- * running child is not a test failure worth reading.</p>
+ * running child is not a test failure worth reading.
  */
 class PageApiIT {
 

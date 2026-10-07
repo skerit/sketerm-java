@@ -3,8 +3,8 @@ package be.elevenways.sketerm.api;
 /**
  * THE scheme vocabulary a policy can allow, mirroring web_open's policy.allow_schemes enum.
  *
- * <p>{@code about:} is deliberately not a member: it is always allowed, being a view's own blank
- * document, and refusing it would break view creation itself.</p>
+ * {@code about:} is deliberately not a member: it is always allowed, being a view's own blank
+ * document, and refusing it would break view creation itself.
  */
 public enum UrlScheme implements WireValue {
 

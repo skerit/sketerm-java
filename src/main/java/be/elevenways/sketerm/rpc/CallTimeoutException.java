@@ -3,7 +3,7 @@ package be.elevenways.sketerm.rpc;
 /**
  * A sent JSON-RPC request did not answer before its client-side deadline.
  *
- * <p>The peer may still complete the operation, so callers must not blindly retry a mutation.</p>
+ * The peer may still complete the operation, so callers must not blindly retry a mutation.
  */
 public final class CallTimeoutException extends TransportException {
 

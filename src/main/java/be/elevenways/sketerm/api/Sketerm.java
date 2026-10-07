@@ -10,8 +10,8 @@ import java.time.Duration;
 /**
  * A launched Sketerm server: process, transport, connection and session composed as one closeable.
  *
- * <p>Closing tears the stack down in order and cannot hang: the process layer ends in a
- * force-kill.</p>
+ * Closing tears the stack down in order and cannot hang: the process layer ends in a
+ * force-kill.
  */
 public final class Sketerm implements AutoCloseable {
 

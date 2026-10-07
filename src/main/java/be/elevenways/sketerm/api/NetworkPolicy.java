@@ -14,14 +14,14 @@ import java.util.Set;
 /**
  * An ENFORCED per-view network policy: what a view may load, and how much of it.
  *
- * <p>A policy is installed at {@link Browser#openPage(String, OpenOptions)} and never later - a
+ * A policy is installed at {@link Browser#openPage(String, OpenOptions)} and never later - a
  * view's earlier requests would predate it - and can afterwards only be TIGHTENED
  * ({@link Page#tightenPolicy}). Every field left unset keeps the server's own default, so a policy
- * says only what it means to constrain.</p>
+ * says only what it means to constrain.
  *
- * <p>Budgets LATCH: the first one that is hit exhausts the view permanently. Read tools keep
+ * Budgets LATCH: the first one that is hit exhausts the view permanently. Read tools keep
  * answering (carrying the exhaustion fact, see {@link Page#isPolicyExhausted()}) while every tool
- * that would cause traffic is refused with a {@link RefusedException}.</p>
+ * that would cause traffic is refused with a {@link RefusedException}.
  *
  * @param allowHosts hosts (and their subdomains) the TOP-LEVEL document may load from; empty means
  *                   the host of the opened url only
@@ -165,11 +165,11 @@ public record NetworkPolicy(List<String> allowHosts,
     /**
      * Re-type the policy echo a policied answer carries.
      *
-     * <p>AIDEV-NOTE: the echo is the EFFECTIVE policy, not the one that was sent, so it differs
+     * AIDEV-NOTE: the echo is the EFFECTIVE policy, not the one that was sent, so it differs
      * from its own input in two documented ways: allow_schemes always lists the effective set (the
      * http+https default included) and a budget the caller never set echoes as 0. A 0 budget is
      * decoded back to null - "unbounded" - so a decoded echo compares equal to the policy that
-     * asked for no budget at all.</p>
+     * asked for no budget at all.
      *
      * @return the decoded policy, or null when the answer carried none
      */

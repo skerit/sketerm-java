@@ -6,8 +6,8 @@ import java.util.Set;
  * THE profile-name rule, mirroring webprofiles.validName in the server: 1-64 characters of
  * [a-z0-9_-], and neither reserved word.
  *
- * <p>It is checked client-side as well because the server refuses fail-closed: a rejected name
- * opens nothing, and finding that out before the call keeps the refusal local and cheap.</p>
+ * It is checked client-side as well because the server refuses fail-closed: a rejected name
+ * opens nothing, and finding that out before the call keeps the refusal local and cheap.
  */
 public final class ProfileNames {
 

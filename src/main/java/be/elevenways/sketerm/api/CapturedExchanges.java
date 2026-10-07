@@ -9,9 +9,9 @@ import java.util.Map;
 /**
  * One page of a view's captured exchanges, oldest cursor first.
  *
- * <p>Nothing is lost silently: a body past a cap is flagged on its exchange, an exchange the caps
+ * Nothing is lost silently: a body past a cap is flagged on its exchange, an exchange the caps
  * could not hold at all is counted in {@link #dropped()}, and more finished exchanges past this page
- * set {@link #more()}. Page on with {@code since = nextSince()}.</p>
+ * set {@link #more()}. Page on with {@code since = nextSince()}.
  *
  * @param state whether the capture is still recording
  * @param nextSince the cursor to pass as 'since' for the next page

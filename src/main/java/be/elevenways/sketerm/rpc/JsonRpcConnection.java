@@ -16,9 +16,9 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Request/response correlation over a {@link SketermTransport}, with one reader thread.
  *
- * <p>The server echoes ids as JSON integers, so every incoming id is normalised to a long before
+ * The server echoes ids as JSON integers, so every incoming id is normalised to a long before
  * it is looked up. A message whose id matches nothing pending is dropped: that covers both
- * notifications and late answers to timed-out calls.</p>
+ * notifications and late answers to timed-out calls.
  */
 public final class JsonRpcConnection implements AutoCloseable {
 

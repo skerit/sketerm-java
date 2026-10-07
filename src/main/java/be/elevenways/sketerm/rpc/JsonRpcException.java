@@ -5,7 +5,7 @@ import java.util.Map;
 /**
  * A JSON-RPC error object returned in place of a result.
  *
- * <p>Distinct from a tool failure, which arrives as a successful result carrying isError.</p>
+ * Distinct from a tool failure, which arrives as a successful result carrying isError.
  */
 public class JsonRpcException extends RuntimeException {
 

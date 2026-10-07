@@ -7,8 +7,8 @@ import java.util.Locale;
 /**
  * The base of every api-layer failure and THE one home of the error-code to exception mapping.
  *
- * <p>An unrecognised code fails closed as this base type rather than being folded into a
- * neighbouring meaning.</p>
+ * An unrecognised code fails closed as this base type rather than being folded into a
+ * neighbouring meaning.
  */
 public class SketermApiException extends RuntimeException {
 
@@ -44,8 +44,8 @@ public class SketermApiException extends RuntimeException {
     /**
      * Turn a tool failure into its typed api exception.
      *
-     * <p>The switch below is exhaustive over {@link ErrorCode} on purpose: a new server code cannot
-     * be added without this mapping refusing to compile.</p>
+     * The switch below is exhaustive over {@link ErrorCode} on purpose: a new server code cannot
+     * be added without this mapping refusing to compile.
      */
     public static SketermApiException from(ToolException cause) {
 

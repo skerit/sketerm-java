@@ -8,8 +8,8 @@ import java.util.Map;
 /**
  * The single JSON seam of sketerm-java, a thin facade over one shared protoblast {@link Dry}.
  *
- * <p>Dry hands small integers back as {@link Integer} and larger ones as {@link Long}, so every
- * numeric getter here normalises through {@link Number} instead of casting.</p>
+ * Dry hands small integers back as {@link Integer} and larger ones as {@link Long}, so every
+ * numeric getter here normalises through {@link Number} instead of casting.
  */
 public final class Json {
 

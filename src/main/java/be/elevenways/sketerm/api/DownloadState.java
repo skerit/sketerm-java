@@ -3,8 +3,8 @@ package be.elevenways.sketerm.api;
 /**
  * THE per-file download vocabulary, mirroring web_download's state enum.
  *
- * <p>Only {@link #FAILED} is a failure: {@link #TIMED_OUT} and the two not-finished-yet members are
- * DATA, since the call's budget ran out while the transfer was still legitimately running.</p>
+ * Only {@link #FAILED} is a failure: {@link #TIMED_OUT} and the two not-finished-yet members are
+ * DATA, since the call's budget ran out while the transfer was still legitimately running.
  */
 public enum DownloadState implements WireValue {
 

@@ -7,8 +7,8 @@ import java.util.Map;
 /**
  * What web_close did, and what a later handle-less call now addresses.
  *
- * <p>The backend decides how destructive this was: headless it destroyed a helper view, but with a
- * GUI attached it closed the USER'S pane, exactly as close_pane does.</p>
+ * The backend decides how destructive this was: headless it destroyed a helper view, but with a
+ * GUI attached it closed the USER'S pane, exactly as close_pane does.
  *
  * @param backend "gui" or "headless"
  * @param closed the handle that was closed

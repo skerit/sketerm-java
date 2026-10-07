@@ -5,8 +5,8 @@ import java.time.Duration;
 /**
  * How to open a view; every field is optional and null leaves the server's default in place.
  *
- * <p>A profile and an ephemeral identity are opposite answers to the same question, so asking for
- * both is refused here rather than at the server.</p>
+ * A profile and an ephemeral identity are opposite answers to the same question, so asking for
+ * both is refused here rather than at the server.
  *
  * @param width the headless viewport width, ignored with a GUI (server default 1280)
  * @param height the headless viewport height, ignored with a GUI (server default 800)
@@ -81,8 +81,8 @@ public record OpenOptions(Integer width,
     /**
      * Open under an enforced network policy.
      *
-     * <p>Fail closed, exactly as the server is: a browser helper without the net-policy capability
-     * refuses the open and NOTHING is opened, never a view running unpoliced.</p>
+     * Fail closed, exactly as the server is: a browser helper without the net-policy capability
+     * refuses the open and NOTHING is opened, never a view running unpoliced.
      */
     public static OpenOptions withNetworkPolicy(NetworkPolicy policy) {
         if (policy == null) {
@@ -96,8 +96,8 @@ public record OpenOptions(Integer width,
      * Open with a response-body capture: every exchange the filter names is recorded, request body
      * and response headers included, from the view's very first request on.
      *
-     * <p>Fail closed, exactly as the server is: a browser helper without the capture capability
-     * refuses the open and NOTHING is opened, never a view that silently records nothing.</p>
+     * Fail closed, exactly as the server is: a browser helper without the capture capability
+     * refuses the open and NOTHING is opened, never a view that silently records nothing.
      */
     public static OpenOptions withCapture(CaptureFilter capture) {
         if (capture == null) {

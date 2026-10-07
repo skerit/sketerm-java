@@ -9,9 +9,9 @@ import java.util.Map;
 /**
  * The decoded result of tools/call.
  *
- * <p>Sketerm has two structured shapes in the wild, so {@link #decode} applies one compatibility
+ * Sketerm has two structured shapes in the wild, so {@link #decode} applies one compatibility
  * rule: use structuredContent when the server sent it, otherwise try to read the first text block
- * as a JSON object (what 0.1.3 emits), otherwise treat the result as prose only.</p>
+ * as a JSON object (what 0.1.3 emits), otherwise treat the result as prose only.
  *
  * @param structured the machine-readable payload, or null when the result is prose only
  */

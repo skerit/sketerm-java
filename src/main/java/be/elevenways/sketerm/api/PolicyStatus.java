@@ -9,8 +9,8 @@ import java.util.Map;
 /**
  * One web_policy answer: the installed policy plus its live accounting.
  *
- * <p>This is the machine-readable half of every policy refusal sentence: when a traffic tool throws
- * a {@link RefusedException}, this says which budget went and by how much.</p>
+ * This is the machine-readable half of every policy refusal sentence: when a traffic tool throws
+ * a {@link RefusedException}, this says which budget went and by how much.
  *
  * @param active whether any policy is installed on the view at all
  * @param source where the installed policy came from

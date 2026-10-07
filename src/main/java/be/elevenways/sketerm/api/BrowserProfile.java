@@ -8,8 +8,8 @@ import java.util.Map;
 /**
  * One named persistent browsing identity, as web_profiles reports it.
  *
- * <p>The context id is opaque and is retired by a reset, so a profile is addressed by NAME
- * everywhere; the id is only good for recognising that a reset happened.</p>
+ * The context id is opaque and is retired by a reset, so a profile is addressed by NAME
+ * everywhere; the id is only good for recognising that a reset happened.
  *
  * @param name the name web_open takes as 'profile'
  * @param context the engine identity-context id, which changes when the profile is reset

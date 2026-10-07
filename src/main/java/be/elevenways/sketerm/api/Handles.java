@@ -7,7 +7,7 @@ import java.util.Map;
 /**
  * THE reader of a view handle, which the wire spells 'pane' with a GUI and 'view' headless.
  *
- * <p>Both spellings go back out as the 'pane' argument, so every caller holds one integer.</p>
+ * Both spellings go back out as the 'pane' argument, so every caller holds one integer.
  */
 public final class Handles {
 

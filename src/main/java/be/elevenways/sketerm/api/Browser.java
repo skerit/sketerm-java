@@ -10,8 +10,8 @@ import java.util.Map;
 /**
  * The browser face of a session: it opens views and lists the ones that are open.
  *
- * <p>With a GUI attached these are the user's own tabs; headless they are views this server's own
- * browser engine hosts. Either way a view is a {@link Page} addressed by an integer handle.</p>
+ * With a GUI attached these are the user's own tabs; headless they are views this server's own
+ * browser engine hosts. Either way a view is a {@link Page} addressed by an integer handle.
  */
 public final class Browser {
 
@@ -24,8 +24,8 @@ public final class Browser {
     /**
      * Open a new view on a url and wait for that first navigation to settle.
      *
-     * <p>A successful but slow open can return a live page without its first semantic tree;
-     * {@link Page#lastSnapshot()} is then null and {@link Page#openingSnapshotError()} says why.</p>
+     * A successful but slow open can return a live page without its first semantic tree;
+     * {@link Page#lastSnapshot()} is then null and {@link Page#openingSnapshotError()} says why.
      *
      * @throws ProtocolMismatchException when the answer carries no view handle
      */
@@ -183,9 +183,9 @@ public final class Browser {
     /**
      * The named persistent browsing identities this server can open views in.
      *
-     * <p>A profile is created by opening a view in it, so this lists what has been used, not what
+     * A profile is created by opening a view in it, so this lists what has been used, not what
      * could be. Headless only: with a GUI attached the browser's identity containers are the
-     * user's own and the tool refuses.</p>
+     * user's own and the tool refuses.
      *
      * @throws UnavailableException with a GUI attached, or when the profile store cannot be opened
      */
@@ -196,8 +196,8 @@ public final class Browser {
     /**
      * Erase a profile's cookies, logins and cache. Irreversible.
      *
-     * <p>The name stays usable: the next open with it starts from an empty, freshly allocated jar
-     * behind a new context id.</p>
+     * The name stays usable: the next open with it starts from an empty, freshly allocated jar
+     * behind a new context id.
      *
      * @throws ConflictException while any open view still holds the profile; close them first
      * @throws NotFoundException when no profile has that name
@@ -215,9 +215,9 @@ public final class Browser {
      * Register a profile's SESSION-DEFAULT network policy, applied by every later open in that
      * profile whose own call carries no policy.
      *
-     * <p>The registration is in memory and gone when the server exits - deliberately, since a
+     * The registration is in memory and gone when the server exits - deliberately, since a
      * durable copy could be silently lost by a store rebuild - which is what the answer's
-     * {@link ProfilePolicy#durable()} keeps saying out loud.</p>
+     * {@link ProfilePolicy#durable()} keeps saying out loud.
      *
      * @throws UnavailableException with a GUI attached: policies are a headless-only feature
      * @throws InvalidArgsException when the name breaks {@link ProfileNames}
@@ -251,8 +251,8 @@ public final class Browser {
     /**
      * Preflight: whether this server advertises named browsing profiles at all.
      *
-     * <p>Worth asking before offering the feature, since a refusal is fail-closed and opens
-     * nothing rather than falling back to the shared jar.</p>
+     * Worth asking before offering the feature, since a refusal is fail-closed and opens
+     * nothing rather than falling back to the shared jar.
      *
      * @return the capabilities report's web_profiles flag, false when the server names none
      */
@@ -263,8 +263,8 @@ public final class Browser {
     /**
      * Preflight: whether this server can download a url through a view's own browser.
      *
-     * <p>False also means {@link Page#downloads()} has nothing to list, since a helper without the
-     * capability answers no download at all.</p>
+     * False also means {@link Page#downloads()} has nothing to list, since a helper without the
+     * capability answers no download at all.
      *
      * @return the capabilities report's web_downloads flag, false when the server names none
      */
@@ -275,8 +275,8 @@ public final class Browser {
     /**
      * Preflight: whether this server can capture the response bodies a view's page receives.
      *
-     * <p>Worth asking before offering the feature, since a captured open is fail-closed: without the
-     * capability NOTHING is opened.</p>
+     * Worth asking before offering the feature, since a captured open is fail-closed: without the
+     * capability NOTHING is opened.
      *
      * @return the capabilities report's web_capture flag, false when the server names none (or a
      *         GUI is attached: capture is headless only)

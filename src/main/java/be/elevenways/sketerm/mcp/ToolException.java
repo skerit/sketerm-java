@@ -7,8 +7,8 @@ import java.util.Map;
 /**
  * A tool that answered with isError, the failure channel distinct from a JSON-RPC error.
  *
- * <p>The newer server shape puts a machine-readable failure under structuredContent.error; when it
- * is absent the code and retryable flag are null and only the prose survives.</p>
+ * The newer server shape puts a machine-readable failure under structuredContent.error; when it
+ * is absent the code and retryable flag are null and only the prose survives.
  */
 public class ToolException extends RuntimeException {
 

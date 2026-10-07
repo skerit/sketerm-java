@@ -11,9 +11,9 @@ import java.util.Map;
 /**
  * One captured body returned INLINE: text as UTF-8, a binary as base64.
  *
- * <p>Two different cuts can apply and both are facts, never silent: {@link #truncation()} is the
+ * Two different cuts can apply and both are facts, never silent: {@link #truncation()} is the
  * CAPTURE holding less than the page received, and {@link #inlineTruncated()} is this answer
- * carrying only a prefix of what is held ({@link Page#responseBodyToFile} gets it whole).</p>
+ * carrying only a prefix of what is held ({@link Page#responseBodyToFile} gets it whole).
  *
  * @param complete false while the exchange is still streaming, so the body may still grow
  * @param transcodedFrom the single-byte charset the text was converted from, null when it arrived

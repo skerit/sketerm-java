@@ -8,11 +8,11 @@ import java.util.Set;
  * THE refusal vocabulary, mirroring protocol.NetReason: why one request was blocked, and - for the
  * latching members - why a whole view's policy latched.
  *
- * <p>AIDEV-NOTE: the schemas spell this vocabulary twice, as web_network's per-request
+ * AIDEV-NOTE: the schemas spell this vocabulary twice, as web_network's per-request
  * {@code reason} and as web_policy's {@code exhausted_reason}, but the server has one
  * declaring home and the second list is the subset that can LATCH. So this enum is that one home
  * and {@link #latches()} carries the subset as a fact on the member; {@link #EXHAUSTION_REASONS}
- * derives the shorter list rather than restating it.</p>
+ * derives the shorter list rather than restating it.
  */
 public enum DenialReason implements WireValue {
 

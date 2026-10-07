@@ -13,15 +13,15 @@ import java.util.Set;
 /**
  * Which exchanges a view's response-body CAPTURE records, and how much of them it may hold.
  *
- * <p>A capture is installed at {@link Browser#openPage(String, OpenOptions)} and never later: the
+ * A capture is installed at {@link Browser#openPage(String, OpenOptions)} and never later: the
  * requests that already ran would predate it. From there it records, for the view's whole
  * lifetime, every request whose clauses ALL hold - an omitted clause does not restrict - and
  * nothing that fails one is ever buffered. A live capture can only be narrowed
- * ({@link Page#clearCaptured()}, {@link Page#disableCapture()}).</p>
+ * ({@link Page#clearCaptured()}, {@link Page#disableCapture()}).
  *
- * <p>The same clauses select a response to wait for in {@link Page#waitForResponse}; there the byte
+ * The same clauses select a response to wait for in {@link Page#waitForResponse}; there the byte
  * caps mean nothing and are not sent, and an empty {@link #types()} means ANY class rather than
- * the capture's xhr default.</p>
+ * the capture's xhr default.
  *
  * @param hosts hosts (and their subdomains) whose requests count; empty means any host
  * @param urlContains a url substring, case-sensitive; null means no restriction

@@ -9,9 +9,9 @@ import java.util.Map;
 /**
  * One web_policy_set answer for a live view: what the update actually narrowed, and what it refused.
  *
- * <p>A live policy can only TIGHTEN, so what already ran under the old policy stays within the new
+ * A live policy can only TIGHTEN, so what already ran under the old policy stays within the new
  * one's story. A field that would loosen is named in {@link #ignored()} rather than applied; a
- * request in which EVERY field would loosen is refused outright with a {@link RefusedException}.</p>
+ * request in which EVERY field would loosen is refused outright with a {@link RefusedException}.
  *
  * @param serial the policy generation after the update
  * @param policy the effective policy afterwards, re-typed from the answer's echo

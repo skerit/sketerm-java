@@ -63,9 +63,9 @@ public record PageInfo(int handle,
      * Re-wire this entry as the facts shape {@link Page#absorb} expects, so a refresh or an attach
      * updates a page's cache through the exact same seam every other answer does.
      *
-     * <p>{@code policy_exhausted} is included only when true, mirroring the wire contract itself
+     * {@code policy_exhausted} is included only when true, mirroring the wire contract itself
      * (the fact is emitted only on latch) so {@link Page#absorbPolicy} never mistakes an absent key
-     * for the budgets having come back.</p>
+     * for the budgets having come back.
      */
     Map<String, Object> toFacts() {
 

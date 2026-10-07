@@ -15,8 +15,8 @@ import java.util.Optional;
  * One web view, addressed by its handle: every call sends 'pane' explicitly rather than leaning on
  * the server's notion of the current view, so several pages can be driven from one session.
  *
- * <p>{@link #close()} ends the view; every later call on this object is refused locally, because
- * the handle is free to be handed to a view somebody else opens.</p>
+ * {@link #close()} ends the view; every later call on this object is refused locally, because
+ * the handle is free to be handed to a view somebody else opens.
  */
 public final class Page {
 
@@ -59,8 +59,8 @@ public final class Page {
      * The most recent tree this page received, which for a freshly opened page is the one web_open
      * already sent.
      *
-     * <p>Worth reaching for: a snapshot in {@link SnapshotMode#AUTO} right after opening answers
-     * with an empty delta, because the server already sent that tree.</p>
+     * Worth reaching for: a snapshot in {@link SnapshotMode#AUTO} right after opening answers
+     * with an empty delta, because the server already sent that tree.
      *
      * @return the last snapshot, or null when this page was attached or its opening snapshot timed
      *         out; {@link #openingSnapshotError()} preserves the latter reason
@@ -178,10 +178,10 @@ public final class Page {
     /**
      * Whether a policy budget has LATCHED for this view.
      *
-     * <p>Every answer this page decodes carries the fact when it is true, so this is up to date
+     * Every answer this page decodes carries the fact when it is true, so this is up to date
      * without a round trip of its own. Latching is permanent per view: reads keep working, and
      * every tool that would cause traffic is refused with a {@link RefusedException} from here on.
-     * {@link #policy()} has the accounting.</p>
+     * {@link #policy()} has the accounting.
      */
     public boolean isPolicyExhausted() {
         return this.policyExhausted;
@@ -198,8 +198,8 @@ public final class Page {
      * This view's enforced policy and its live accounting: requests, bytes, navigations, time left,
      * refusals by reason, and whether a budget latched.
      *
-     * <p>This is the machine-readable half of every policy refusal sentence, and it keeps answering
-     * after the budgets are spent.</p>
+     * This is the machine-readable half of every policy refusal sentence, and it keeps answering
+     * after the budgets are spent.
      *
      * @throws UnavailableException with a GUI attached: policies are a headless-only feature
      */
@@ -215,10 +215,10 @@ public final class Page {
     /**
      * Narrow this view's live policy.
      *
-     * <p>A live policy can only TIGHTEN - host lists shrink, budgets lower, blocked types grow,
+     * A live policy can only TIGHTEN - host lists shrink, budgets lower, blocked types grow,
      * allow_private only turns off - so what already ran under the old policy stays within the new
      * one's story. A single field that would loosen is named in {@link PolicyUpdate#ignored()}
-     * rather than applied.</p>
+     * rather than applied.
      *
      * @throws RefusedException when EVERY requested change would loosen the live policy
      * @throws ConflictException when this view runs no policy at all: one is installed at open and
@@ -257,12 +257,12 @@ public final class Page {
     /**
      * Close this view.
      *
-     * <p>Headless it destroys the helper view, and with it an ephemeral identity whose last view
+     * Headless it destroys the helper view, and with it an ephemeral identity whose last view
      * this was; a named profile KEEPS its storage ({@link Browser#resetProfile} erases it). With a
      * GUI attached this closes the user's PANE and is destructive - the answer's backend says
-     * which of the two happened.</p>
+     * which of the two happened.
      *
-     * <p>Closing twice is a no-op that answers with the first close's result.</p>
+     * Closing twice is a no-op that answers with the first close's result.
      */
     public CloseResult close() {
 
@@ -435,9 +435,9 @@ public final class Page {
     /**
      * Evaluate JavaScript and write the WHOLE result to a file instead of into the answer.
      *
-     * <p>The bytes go from the page to disk without passing through this session, which is what
+     * The bytes go from the page to disk without passing through this session, which is what
      * makes a big scrape cost nothing to read. A string value is written as itself and anything else
-     * as JSON, which {@link EvaluatedFile#format()} states rather than leaves to be guessed.</p>
+     * as JSON, which {@link EvaluatedFile#format()} states rather than leaves to be guessed.
      *
      * @param destination an absolute path on the machine running the server
      * @throws InvalidArgsException when the destination is not absolute
@@ -474,9 +474,9 @@ public final class Page {
      * Download a url to a file, fetched by THIS view's browser, so its cookies, session and route
      * carry and a file behind a login needs no token of its own.
      *
-     * <p>A {@link DownloadState#TIMED_OUT} answer is data, not a failure: the call's budget ran out
+     * A {@link DownloadState#TIMED_OUT} answer is data, not a failure: the call's budget ran out
      * while the transfer was still running, and {@link #downloads()} can say later what became of
-     * it.</p>
+     * it.
      *
      * @param destination an absolute file path on the machine running the server
      * @throws InvalidArgsException when the destination is not absolute
@@ -509,9 +509,9 @@ public final class Page {
     /**
      * Download several urls into one directory, each named from its url's last path segment.
      *
-     * <p>They are fetched ONE AT A TIME, so the whole batch shares the call's budget: past it the
+     * They are fetched ONE AT A TIME, so the whole batch shares the call's budget: past it the
      * remaining entries come back {@link DownloadState#NOT_STARTED} and the call can be repeated
-     * with what is left.</p>
+     * with what is left.
      *
      * @param directory an absolute directory path on the machine running the server
      * @throws InvalidArgsException when the directory is not absolute, the list is empty, or it
@@ -569,9 +569,9 @@ public final class Page {
     /**
      * One page of this view's FINISHED exchanges, oldest cursor first.
      *
-     * <p>The cursor follows the order exchanges FINISHED, not their request order - responses
+     * The cursor follows the order exchanges FINISHED, not their request order - responses
      * finish out of order, and paging by request seq would skip a slow one. Each exchange still
-     * carries its request's {@code seq}, the join key with {@link #network()}.</p>
+     * carries its request's {@code seq}, the join key with {@link #network()}.
      *
      * @param since only exchanges past this cursor; a previous page's {@link CapturedExchanges#nextSince()}
      * @param max at most this many, the server's 50 when null (cap 500)
@@ -583,8 +583,8 @@ public final class Page {
     /**
      * As {@link #captured(long, Integer)}, followed by the exchanges still IN FLIGHT (cursor 0).
      *
-     * <p>A body the page never reads keeps its load open in the engine, so such an exchange stays in
-     * flight until the page reads it or navigates away; its bytes are readable meanwhile.</p>
+     * A body the page never reads keeps its load open in the engine, so such an exchange stays in
+     * flight until the page reads it or navigates away; its bytes are readable meanwhile.
      */
     public CapturedExchanges capturedWithInFlight(long since, Integer max) {
         return this.listCaptured(since, max, true, null);
@@ -663,9 +663,9 @@ public final class Page {
      * Wait for the next captured response matching {@code filter} that finishes after THIS call
      * starts.
      *
-     * <p>Racy after an action: a response can finish between the action and this call. For scroll
+     * Racy after an action: a response can finish between the action and this call. For scroll
      * then wait, take {@link #captureMark()} first and use
-     * {@link #waitForResponse(CaptureFilter, long, Duration)}.</p>
+     * {@link #waitForResponse(CaptureFilter, long, Duration)}.
      *
      * @param filter the clauses a response must match; its byte caps are ignored, and empty types
      *               mean ANY class here; null matches every captured exchange

@@ -15,8 +15,8 @@ import java.util.function.Function;
 /**
  * A scripted Sketerm: one handler per tool name, plus the call log every assertion reads.
  *
- * <p>It answers in the migrated shape by default (structuredContent beside a prose block), which is
- * exactly what the api layer requires; {@link #prose} scripts the old shape on purpose.</p>
+ * It answers in the migrated shape by default (structuredContent beside a prose block), which is
+ * exactly what the api layer requires; {@link #prose} scripts the old shape on purpose.
  */
 final class FakeSketermServer {
 

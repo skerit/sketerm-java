@@ -3,8 +3,8 @@ package be.elevenways.sketerm.api;
 /**
  * A call on a {@link Page} this client already closed, refused before it goes out.
  *
- * <p>The handle would be free to be reused by a later view, so sending the call anyway could drive
- * somebody else's page: this is the one refusal that is deliberately local.</p>
+ * The handle would be free to be reused by a later view, so sending the call anyway could drive
+ * somebody else's page: this is the one refusal that is deliberately local.
  */
 public class PageClosedException extends SketermApiException {
 

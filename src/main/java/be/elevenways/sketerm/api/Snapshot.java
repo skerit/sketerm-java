@@ -10,9 +10,9 @@ import java.util.Optional;
 /**
  * One web_snapshot answer: the compact semantic tree plus the document/revision its ids are good in.
  *
- * <p>A snapshot taken in {@link SnapshotMode#AUTO} is a DELTA, so its tree holds only what changed;
+ * A snapshot taken in {@link SnapshotMode#AUTO} is a DELTA, so its tree holds only what changed;
  * search it for something the page always had and you will miss it. Ask for
- * {@link SnapshotMode#FULL} when you want the whole page.</p>
+ * {@link SnapshotMode#FULL} when you want the whole page.
  */
 public final class Snapshot {
 

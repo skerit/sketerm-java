@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * A supervised Sketerm child process: UTF-8 line streams plus a stderr ring kept for diagnostics.
  *
- * <p>A shutdown hook destroys the child, so a crashed JVM never orphans a browser.</p>
+ * A shutdown hook destroys the child, so a crashed JVM never orphans a browser.
  */
 public final class SketermProcess implements AutoCloseable {
 
@@ -136,8 +136,8 @@ public final class SketermProcess implements AutoCloseable {
     /**
      * A single-string description of how the child is doing, suitable for appending to any failure.
      *
-     * <p>A dying child races its own diagnostics, so this waits briefly for the exit status and for
-     * the stderr pump to finish rather than reporting "still running" a millisecond too early.</p>
+     * A dying child races its own diagnostics, so this waits briefly for the exit status and for
+     * the stderr pump to finish rather than reporting "still running" a millisecond too early.
      */
     public String describeFailureContext() {
 

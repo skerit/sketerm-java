@@ -9,10 +9,10 @@ import java.util.Locale;
  * Names match their subdomains; IP literals match exactly, never as suffixes. Bare entries allow
  * every port ordinarily, but only the scheme's default port in untrusted mode.
  *
- * <p>It is checked client-side for the same reason {@link ProfileNames} is: the server refuses
+ * It is checked client-side for the same reason {@link ProfileNames} is: the server refuses
  * fail-closed, so a doomed policy would open nothing, and finding that out before the call keeps
  * the refusal local. A {@code *} is refused rather than read as allow-all - write no policy at all
- * instead of one that allows everything.</p>
+ * instead of one that allows everything.
  */
 public final class PolicyHosts {
 

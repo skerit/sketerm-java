@@ -9,8 +9,8 @@ import java.util.Map;
 /**
  * One web_download answer over several files, or the view's download listing.
  *
- * <p>A batch is never all-or-nothing: a url that could not start is one FAILED entry beside the
- * files that did land, and the counts are the server's own.</p>
+ * A batch is never all-or-nothing: a url that could not start is one FAILED entry beside the
+ * files that did land, and the counts are the server's own.
  *
  * @param listing whether this answer lists downloads this view already knows - page-initiated ones
  *                included - rather than reporting fetches this call started

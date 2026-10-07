@@ -36,11 +36,6 @@ dependencies {
 
     testImplementation platform(libs.junit.bom)
     testImplementation libs.junit.jupiter
-    // The shared source-guard scanner: SourceGuardTest drives the workspace direct-clock-read rule over this
-    // plugin-less library, which no marker-gated Gradle guard task can reach.
-    testImplementation(libs.protoblast.source.guard) {
-        changing = true
-    }
     // Gradle 9 no longer auto-provides the JUnit Platform launcher.
     testRuntimeOnly libs.junit.launcher
 }

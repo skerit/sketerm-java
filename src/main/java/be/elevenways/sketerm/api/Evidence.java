@@ -20,11 +20,11 @@ import java.util.Map;
  * A page as it was at one moment: what it said, what it looked like, what it fetched, and what it
  * was allowed to fetch.
  *
- * <p>Nothing here is a new tool call shape - {@link #capture} composes the reads a caller would
+ * Nothing here is a new tool call shape - {@link #capture} composes the reads a caller would
  * make by hand and freezes their answers together, so the pieces are known to describe the SAME
  * moment rather than three round trips apart. Every part it uses is a read tool, so a capture still
  * works on a view whose network policy has latched: that is the point, since an exhausted view is
- * exactly the one whose evidence someone wants.</p>
+ * exactly the one whose evidence someone wants.
  *
  * @param finalUrl where the view actually ended up, after any redirects
  * @param capturedAt when the capture began, from the client's clock
@@ -156,8 +156,8 @@ public record Evidence(String finalUrl,
     /**
      * The manifest as a plain map, which is also what {@link #writeTo} serializes.
      *
-     * <p>The screenshot rides as its digest and byte count only: the bytes themselves are the
-     * sibling png, not a base64 blob inside the json.</p>
+     * The screenshot rides as its digest and byte count only: the bytes themselves are the
+     * sibling png, not a base64 blob inside the json.
      */
     public Map<String, Object> toMap() {
 

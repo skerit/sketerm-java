@@ -3,8 +3,8 @@ package be.elevenways.sketerm.api;
 /**
  * A semantic id that no longer addresses anything on the page: take a fresh snapshot and act again.
  *
- * <p>Raised both client-side, when a {@link Ref} comes from a document the page has since left, and
- * from the server's own refusal, which arrives as a generic 'failed' naming the page's reason.</p>
+ * Raised both client-side, when a {@link Ref} comes from a document the page has since left, and
+ * from the server's own refusal, which arrives as a generic 'failed' naming the page's reason.
  */
 public class StaleRefException extends SketermApiException {
 

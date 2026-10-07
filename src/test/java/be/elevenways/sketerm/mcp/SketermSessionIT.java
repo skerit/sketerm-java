@@ -20,8 +20,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 /**
  * Drives the installed `sketerm mcp` binary end to end, skipped when it is not on PATH.
  *
- * <p>The server is mid-migration between result shapes, so every assertion here is shape-agnostic:
- * the decode rule is what turns either shape into the same {@link ToolResult}.</p>
+ * The server is mid-migration between result shapes, so every assertion here is shape-agnostic:
+ * the decode rule is what turns either shape into the same {@link ToolResult}.
  */
 class SketermSessionIT {
 

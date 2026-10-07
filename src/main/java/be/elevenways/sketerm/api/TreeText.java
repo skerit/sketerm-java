@@ -7,8 +7,8 @@ import java.util.Locale;
 /**
  * THE reader of Sketerm's compact semantic tree notation, shared by snapshots and query matches.
  *
- * <p>It is deliberately line-based: the notation is a listing, not a document, and every consumer
- * that wants more detail has the original line on the {@link TreeNode}.</p>
+ * It is deliberately line-based: the notation is a listing, not a document, and every consumer
+ * that wants more detail has the original line on the {@link TreeNode}.
  */
 public final class TreeText {
 
