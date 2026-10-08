@@ -150,7 +150,7 @@ public final class Sketerm implements AutoCloseable {
         }
 
         this.closed = true;
-        this.calls.closeStreams();
+        this.calls.closeStreams(null);
         this.session.close();
     }
 }

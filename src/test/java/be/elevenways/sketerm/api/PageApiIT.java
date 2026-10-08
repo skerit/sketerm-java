@@ -40,8 +40,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class PageApiIT {
 
-    /** Kept short on purpose: the helper's unix socket path has roughly 107 bytes to live in. */
-    private static final String RUNTIME_DIR = "/tmp/claude-1000/skjava-it";
+    /** A private temp directory, kept short: the helper's unix socket path has roughly 107 bytes to live in. */
+    private static Path runtimeDir;
 
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(60);
     private static final long RUN_ID = ProcessHandle.current().pid();
@@ -787,7 +787,9 @@ class PageApiIT {
      */
     static SketermOptions.Builder options(String instance) throws IOException {
 
-        Files.createDirectories(Path.of(RUNTIME_DIR));
+        synchronized (PageApiIT.class) {
+            if (runtimeDir == null) runtimeDir = Files.createTempDirectory("skjava-it-");
+        }
 
         Path state = Path.of(System.getProperty("user.dir"), "build", "it-state",
                 RUN_ID + "-" + instance);
@@ -800,7 +802,7 @@ class PageApiIT {
                 .env(clearedSketermEnvironment())
                 .env("SKETERM_WEB_BIN", helper.toString())
                 .env("SKETERM_MUX_BIN", mux.toString())
-                .env("XDG_RUNTIME_DIR", RUNTIME_DIR)
+                .env("XDG_RUNTIME_DIR", runtimeDir.toString())
                 .env("XDG_STATE_HOME", state.toString());
     }
 

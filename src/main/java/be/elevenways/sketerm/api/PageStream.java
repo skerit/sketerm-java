@@ -16,7 +16,6 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.EnumSet;
 import java.util.Locale;
@@ -45,7 +44,6 @@ public final class PageStream implements AutoCloseable {
     private final @NonNull SocketChannel channel;
     private final @NonNull Listener listener;
     private final @NonNull ToolCalls owner;
-    private final @NonNull Runnable release;
     private final @NonNull JobRunner jobs = JobRunner.create("sketerm-page-stream");
     private final @NonNull Object writeLock = new Object();
     private final @NonNull Object lifecycleLock = new Object();
@@ -118,60 +116,32 @@ public final class PageStream implements AutoCloseable {
     public record Audio(long ptsUs, int rate, int channels, int samples, @NonNull ByteBuffer opus) {}
 
     private PageStream(@NonNull SocketChannel channel, @NonNull Listener listener, @NonNull ToolCalls owner,
-                       @NonNull Runnable release, boolean audio, @NonNull String route) {
+                       boolean audio, @NonNull String route) {
         this.channel = channel;
         this.listener = listener;
         this.owner = owner;
-        this.release = release;
         this.audio = audio;
         this.route = route;
     }
 
-    static @NonNull PageStream connect(@NonNull Map<String, Object> facts, int handle, @NonNull Listener listener,
-                                      @NonNull ToolCalls owner, @NonNull Runnable release) {
+    /**
+     * Checks only what this client cannot work without: the V1 decoder, the socket and its token.
+     */
+    static @NonNull PageStream connect(@NonNull Map<String, Object> facts, @NonNull Listener listener,
+                                      @NonNull ToolCalls owner) {
         Objects.requireNonNull(listener, "A stream needs its listener before connecting");
-        if (!"headless".equals(string(facts, "backend")) || integer(facts, "protocol_version") != PROTOCOL_VERSION
-                || integer(facts, "max_unacked_frames") != MAX_UNACKED_FRAMES
-                || !PIXEL_FORMAT.equals(string(facts, "pixel_format"))) {
-            throw new ProtocolMismatchException("web_stream requires headless stream v1, two frames and BGRA premul");
+        if (!(facts.get("protocol_version") instanceof Number version) || version.longValue() != PROTOCOL_VERSION) {
+            throw new ProtocolMismatchException("web_stream does not speak binary stream v" + PROTOCOL_VERSION);
         }
-        boolean hasHandle = false;
-        for (String key : List.of("view", "pane")) {
-            if (facts.containsKey(key)) {
-                hasHandle = true;
-                if (integer(facts, key) != handle) {
-                    throw new ProtocolMismatchException("web_stream returned a different " + key);
-                }
-            }
-        }
-        if (!hasHandle) throw new ProtocolMismatchException("web_stream returned no view handle");
+        String path = string(facts, "socket_path");
         String token = string(facts, "token");
-        if (!token.matches("[0-9a-f]{32}")) {
-            throw new ProtocolMismatchException("web_stream token must be 32 lowercase ASCII hex characters");
-        }
-        String route = string(facts, "route");
-        if (!(route.equals("direct") || route.equals("tor")
-                || route.startsWith("via:") && route.length() > 4
-                || route.startsWith("on:") && route.length() > 3)) {
-            throw new ProtocolMismatchException("web_stream returned an unknown route");
-        }
-        Object audio = facts.get("audio");
-        if (!(audio instanceof Boolean audioEnabled)) {
-            throw new ProtocolMismatchException("web_stream.audio must be boolean");
-        }
-        Path path;
-        try {
-            path = Path.of(string(facts, "socket_path"));
-        } catch (IllegalArgumentException invalid) {
-            throw new ProtocolMismatchException("web_stream.socket_path is invalid");
-        }
-        if (!path.isAbsolute()) throw new ProtocolMismatchException("web_stream.socket_path must be absolute");
+        String route = facts.get("route") instanceof String value ? value : "";
         SocketChannel channel = null;
         try {
             channel = SocketChannel.open(StandardProtocolFamily.UNIX);
             channel.connect(UnixDomainSocketAddress.of(path));
-            PageStream stream = new PageStream(channel, listener, owner, release, audioEnabled, route);
-            stream.send(1, token.getBytes(StandardCharsets.US_ASCII));
+            PageStream stream = new PageStream(channel, listener, owner, Boolean.TRUE.equals(facts.get("audio")), route);
+            stream.send(1, token.getBytes(StandardCharsets.UTF_8));
             return stream;
         } catch (IOException | RuntimeException failure) {
             if (channel != null) {
@@ -321,7 +291,6 @@ public final class PageStream implements AutoCloseable {
             if (failure != null) failure.addSuppressed(cleanup);
         }
         this.owner.releaseStream(this);
-        this.release.run();
         // Socket close wakes the reader; interruption would poison its final listener callback.
         this.jobs.shutdown();
     }
@@ -431,14 +400,5 @@ public final class PageStream implements AutoCloseable {
             throw new ProtocolMismatchException("web_stream." + key + " must be a nonempty string");
         }
         return value;
-    }
-
-    private static int integer(@NonNull Map<String, Object> facts, @NonNull String key) {
-        Object value = facts.get(key);
-        if (!(value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long)
-                || ((Number) value).longValue() < 1 || ((Number) value).longValue() > Integer.MAX_VALUE) {
-            throw new ProtocolMismatchException("web_stream." + key + " must be a positive int");
-        }
-        return ((Number) value).intValue();
     }
 }

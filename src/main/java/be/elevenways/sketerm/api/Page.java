@@ -49,8 +49,8 @@ public final class Page {
     private boolean closed;
     private CloseResult closeResult;
     private Snapshot lastSnapshot;
-    private final List<PageStream> streams = new ArrayList<>();
-    private boolean streamsClosed;
+    /** Set under the ToolCalls lock once close began: no stream is admitted after it. */
+    boolean streamsClosed;
 
     Page(ToolCalls calls, int handle, Map<String, Object> structured, Snapshot opening) {
         this.calls = calls;
@@ -276,7 +276,7 @@ public final class Page {
             return this.closeResult;
         }
 
-        this.closeStreams();
+        this.calls.closeStreams(this);
         Map<String, Object> structured = this.calls.structured("web_close", this.args());
 
         this.closed = true;
@@ -829,9 +829,7 @@ public final class Page {
     /** A non-null cap changes the view's CEF paint rate and persists after stream close. */
     public @NonNull PageStream stream(@NonNull Listener listener, @Nullable Integer maxFps) {
         if (listener == null) throw new IllegalArgumentException("A stream needs a listener");
-        synchronized (this.streams) {
-            if (this.streamsClosed || this.closed) throw new PageClosedException(this.handle, "stream()");
-        }
+        if (this.closed) throw new PageClosedException(this.handle, "stream()");
         OpenOptions.requireMaxFps(maxFps, "web_stream");
         if (maxFps != null && !Browser.capability(this.calls, "web_max_fps")) {
             throw new UnavailableException("Sketerm does not advertise web_max_fps; no stream was opened",
@@ -840,36 +838,16 @@ public final class Page {
         Map<String, Object> arguments = this.args();
         ToolCalls.put(arguments, "max_fps", maxFps);
         Map<String, Object> facts = this.calls.structured("web_stream", arguments);
-        PageStream stream = PageStream.connect(facts, this.handle, listener, this.calls, this::pruneStreams);
+        PageStream stream = PageStream.connect(facts, listener, this.calls);
         try {
             if (maxFps != null && !Long.valueOf(maxFps.longValue()).equals(Json.optLong(facts, "max_fps"))) {
                 throw new ProtocolMismatchException("web_stream did not acknowledge max_fps: " + maxFps);
             }
-            synchronized (this.streams) {
-                if (this.closed || this.streamsClosed) throw new PageClosedException(this.handle, "stream()");
-                this.streams.add(stream);
-                this.calls.ownStream(stream);
-            }
+            this.calls.ownStream(this, stream);
             return stream;
         } catch (RuntimeException | Error failure) {
             stream.close();
             throw failure;
-        }
-    }
-
-    private void closeStreams() {
-        List<PageStream> owned;
-        synchronized (this.streams) {
-            this.streamsClosed = true;
-            owned = List.copyOf(this.streams);
-            this.streams.clear();
-        }
-        for (PageStream stream : owned) stream.close();
-    }
-
-    private void pruneStreams() {
-        synchronized (this.streams) {
-            this.streams.removeIf(PageStream::isClosed);
         }
     }
 

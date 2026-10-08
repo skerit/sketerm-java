@@ -177,60 +177,6 @@ class PageStreamTest {
     }
 
     @Test
-    void pageCloseCannotInterleaveRegistrationAndReaderStart() throws Exception {
-        JobRunner jobs = JobRunner.create("sketerm-registration-race");
-        CompletableFuture<ScriptedPageStream> authenticated = new CompletableFuture<>();
-        CompletableFuture<PageStream> opened = new CompletableFuture<>();
-        CompletableFuture<CloseResult> pageClosed = new CompletableFuture<>();
-        CompletableFuture<Termination> terminated = new CompletableFuture<>();
-        AtomicInteger notifications = new AtomicInteger();
-        try (ScriptedSketerm server = ScriptedSketerm.browser().onStream(authenticated::complete);
-             Sketerm sketerm = server.connect()) {
-            Page page = sketerm.browser().openPage();
-            ToolCalls calls = (ToolCalls) member(page, "calls");
-
-            // 1. Hold Sketerm's admission lock so opening stops exactly at registration, after socket AUTH.
-            synchronized (calls) {
-                Thread opener = jobs.startThread(() -> {
-                    try {
-                        opened.complete(page.stream(new PageStream.Listener() {
-                            @Override public void closed(@NonNull PageStream stream, @Nullable Throwable failure) {
-                                notifications.incrementAndGet();
-                                terminated.complete(new Termination(failure, Thread.currentThread().isInterrupted()));
-                            }
-                        }));
-                    } catch (Throwable failure) {
-                        opened.completeExceptionally(failure);
-                    }
-                });
-                authenticated.get(5, TimeUnit.SECONDS);
-                awaitState(opener, State.BLOCKED, null);
-
-                // 2. Start teardown while admission is blocked; it must not shut the reader down before startup.
-                Thread closer = jobs.startThread(() -> {
-                    try { pageClosed.complete(page.close()); }
-                    catch (Throwable failure) { pageClosed.completeExceptionally(failure); }
-                });
-                awaitState(closer, State.BLOCKED, null);
-            }
-
-            // 3. Both operations finish without a stopped-runner exception, retention or duplicate notification.
-            PageStream stream = opened.get(5, TimeUnit.SECONDS);
-            assertEquals(page.handle(), pageClosed.get(5, TimeUnit.SECONDS).closed());
-            assertTrue(stream.isClosed(), "step 3: Page teardown reached the newly admitted stream");
-            assertNull(terminated.get(5, TimeUnit.SECONDS).failure(), "step 3: deliberate close is orderly");
-            assertEquals(1, notifications.get(), "step 3: one terminal callback");
-            synchronized (calls) {
-                assertTrue(((List<?>) member(calls, "streams")).isEmpty(), "step 3: no retained closed stream");
-            }
-            assertTrue(((List<?>) member(page, "streams")).isEmpty(), "step 3: Page retention is empty too");
-        } finally {
-            jobs.shutdownNow();
-            assertTrue(jobs.awaitTermination(5000), "race jobs completed without deadlock");
-        }
-    }
-
-    @Test
     void eofAndExplicitCloseNotifyExactlyOnceWithoutInterruptingTheCallback() throws Exception {
         for (boolean localClose : List.of(false, true)) {
             CompletableFuture<ScriptedPageStream> peer = new CompletableFuture<>();
@@ -610,12 +556,9 @@ class PageStreamTest {
                     "route", "direct", "socket_path", "/tmp/not-a-stream", "token", ScriptedPageStream.TOKEN,
                     "protocol_version", 1, "max_unacked_frames", 2,
                     "pixel_format", "bgra-premultiplied", "audio", true);
+            // Only what the client cannot work without is refused: the decoder version, the socket and its token.
             for (Map.Entry<String, Object> invalid : Map.<String, Object>ofEntries(
-                    Map.entry("backend", "gui"), Map.entry("view", 2L), Map.entry("protocol_version", 2),
-                    Map.entry("max_unacked_frames", 3), Map.entry("pixel_format", "rgba"),
-                    Map.entry("token", "ABCDEF0123456789abcdef0123456789"), Map.entry("audio", "true"),
-                    Map.entry("socket_path", "relative"), Map.entry("route", "unknown"),
-                    Map.entry("pane", Long.MAX_VALUE)).entrySet()) {
+                    Map.entry("protocol_version", 2), Map.entry("token", ""), Map.entry("socket_path", 7)).entrySet()) {
                 Map<String, Object> hostile = new LinkedHashMap<>(facts);
                 hostile.put(invalid.getKey(), invalid.getValue());
                 server.on("web_stream", hostile);

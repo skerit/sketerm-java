@@ -5,8 +5,8 @@ import be.elevenways.sketerm.mcp.ToolException;
 import be.elevenways.sketerm.mcp.ToolResult;
 
 import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -21,7 +21,8 @@ final class ToolCalls {
 
     private final McpSession session;
     private final Duration defaultTimeout;
-    private final List<PageStream> streams = new ArrayList<>();
+    /** Every open stream and the Page it belongs to; the one registry, so Sketerm and Page close share it. */
+    private final Map<PageStream, Page> streams = new LinkedHashMap<>();
     private boolean streamsClosed;
 
     ToolCalls(McpSession session, Duration defaultTimeout) {
@@ -37,10 +38,11 @@ final class ToolCalls {
         return this.defaultTimeout;
     }
 
-    synchronized void ownStream(PageStream stream) {
+    synchronized void ownStream(Page page, PageStream stream) {
         if (this.streamsClosed) throw new IllegalStateException("Sketerm is closed");
+        if (page.streamsClosed) throw new PageClosedException(page.handle(), "stream()");
         if (stream.isClosed()) throw new IllegalStateException("Page stream is closed");
-        this.streams.add(stream);
+        this.streams.put(stream, page);
         // Start under the same admission lock that shutdown uses; never wait for the reader here.
         try {
             stream.start();
@@ -54,13 +56,21 @@ final class ToolCalls {
         this.streams.remove(stream);
     }
 
-    void closeStreams() {
-        List<PageStream> owned;
+    /**
+     * Close the streams of {@code page}, or of every page when null, and admit no new ones there.
+     */
+    void closeStreams(Page page) {
+        List<PageStream> owned = new ArrayList<>();
         synchronized (this) {
-            this.streamsClosed = true;
-            owned = List.copyOf(this.streams);
-            this.streams.clear();
+            if (page == null) this.streamsClosed = true;
+            else page.streamsClosed = true;
+            this.streams.entrySet().removeIf(entry -> {
+                boolean match = page == null || entry.getValue() == page;
+                if (match) owned.add(entry.getKey());
+                return match;
+            });
         }
+        // Outside the lock: a stream's close calls back into releaseStream.
         for (PageStream stream : owned) stream.close();
     }
 
