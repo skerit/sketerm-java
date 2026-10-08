@@ -11,6 +11,7 @@ import be.elevenways.sketerm.json.Json;
 import be.elevenways.sketerm.process.SketermProcess;
 import be.elevenways.sketerm.rpc.SketermTransport;
 import be.elevenways.sketerm.rpc.StdioTransport;
+import be.elevenways.sketerm.testing.SketermBuild;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.junit.jupiter.api.BeforeAll;
@@ -27,7 +28,6 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -59,15 +59,9 @@ class PageStreamIT {
 
     @BeforeAll
     static void copyFreshBinaries() throws IOException {
-        Path source = PageApiIT.checkoutBinaries();
-        binaries = Path.of("build", "stream-it-bin").toAbsolutePath();
-        Files.createDirectories(binaries);
-        for (String name : List.of("sketerm", "sketerm-webengine", "sketerm-mux")) {
-            assumeTrue(Files.isExecutable(source.resolve(name)), "fresh checkout binary is absent: " + name);
-            Path target = binaries.resolve(name);
-            Files.copy(source.resolve(name), target, StandardCopyOption.REPLACE_EXISTING);
-            assertTrue(target.toFile().setExecutable(true), "copied integration binary is executable: " + target);
-        }
+        Path server = SketermBuild.copy(Path.of("build", "stream-it-bin").toAbsolutePath());
+        assumeTrue(server != null, SketermBuild.NO_CHECKOUT);
+        binaries = server.getParent();
     }
 
     @Test

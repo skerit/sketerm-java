@@ -542,7 +542,8 @@ than recorded as a row of zeroes that would read like enforcement.
 
 ## Testing without a browser
 
-The `testFixtures` artifact publishes `ScriptedSketerm`, a scripted MCP server, and `FakeTransport`.
+The `testFixtures` artifact publishes `ScriptedSketerm`, a scripted MCP server, `FakeTransport`, and
+`SketermBuild`, which finds the real Sketerm a consumer's own real-binary test runs (see Building).
 A consumer's tests drive the real api layer over it instead of a browser:
 
 ```groovy
@@ -590,17 +591,22 @@ disconnect. Close the fixture as well as Sketerm to release any unauthenticated 
 ```
 
 Protoblast must be published to mavenLocal first (`zenit-dev build` in the javaweb workspace).
-`SketermSessionIT` drives the real binary and skips itself when `sketerm` is not on PATH.
-`PageApiIT` drives the whole api layer against a real headless view: it copies `sketerm` and
-`sketerm-webengine` out of the sibling checkout once (or, when that checkout is not built, out of the
-installed `sketerm` on PATH and its `sketerm-webengine` beside it), so a rebuild mid-run cannot swap the binary
-underneath it, and skips itself when either is missing. Its second journey proves close and the
+
+Every real-binary test finds Sketerm through the test fixture `SketermBuild`: the checkout build named by
+`-Dsketerm.it.bin=<dir>` (with zenit-dev, `--define sketerm.it.bin=<dir>`) or the `SKETERM_IT_BIN`
+environment variable, a `zig-out/bin` holding `sketerm`, `sketerm-webengine` and `sketerm-mux`. `copy(dir)`
+copies all three into the test's own directory, so a rebuild mid-run cannot swap a binary underneath it, and
+refuses a build missing one of them; `resolve(dir)` falls back to the installed `sketerm` on PATH with both
+helpers beside it. No sibling checkout is guessed.
+
+`SketermSessionIT` drives `sketerm mcp` from `resolve` and skips itself when there is none.
+`PageApiIT` drives the whole api layer against a real headless view from `resolve`, and skips itself
+when there is none. Its second journey proves close and the
 profile lifecycle over a loopback HTTP fixture (a `data:` document carries no cookies at all in
 Chromium), under its own `XDG_STATE_HOME` and instance name so the profile store is per run; it
 skips those steps when the copied binary predates the profile tools. Its review journey proves
 `key`, `resize`, `console` and `inspect` against the real browser; its hand journey proves `input` and
-`frame` and skips itself on a binary that does not advertise `web_input` and `web_frames`. Pass
-`-Dsketerm.it.bin=<dir>` to copy the two binaries from that directory instead (a fresh `zig-out/bin`).
+`frame` and skips itself on a binary that does not advertise `web_input` and `web_frames`.
 
 `UntrustedPageIT` reuses the copied binaries and controls HTTP, WebSocket and UDP/STUN listeners.
 It proves ordinary network reachability, restricted HTTP loading at a loopback-resolving
@@ -610,10 +616,8 @@ startup/enforcement failures on an advertised supported build fail the test.
 
 `PageStreamTest` covers the binary decoder, borrowed-buffer reuse, exact upstream bytes, hostile
 framing/UTF-8/ranges and stream ownership through the published socket fixture. `PageStreamIT`
-copies all three freshly built binaries from the sibling checkout's `zig-out/bin` (or
-`--define sketerm.it.bin=<dir>`) into its own test directory, never falls back to installed binaries,
-and walks one real page through pixel equality with `web_screenshot`, trusted input during a pending
-MCP wait, typing and clicking with damage limited to the changed box (input-to-damage under 100ms), wheel
+runs only a checkout build (`SketermBuild.copy`), never installed binaries, and walks one real page
+through pixel equality with `web_screenshot`, trusted input during a pending MCP wait, typing and clicking with damage limited to the changed box (input-to-damage under 100ms), wheel
 scrolling, a composed `<select>` popup, a premultiplied custom cursor, an idle helper that sends nothing,
 an animation's frame rate, a stalled reader with bounded helper memory that then gets the newest pixels,
 resize, blur releasing held input, single-use tokens, decodable non-silent Opus (system libopus) and

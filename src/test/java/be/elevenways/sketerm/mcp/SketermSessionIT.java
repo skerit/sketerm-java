@@ -3,10 +3,12 @@ package be.elevenways.sketerm.mcp;
 import be.elevenways.sketerm.process.SketermProcess;
 import be.elevenways.sketerm.rpc.JsonRpcConnection;
 import be.elevenways.sketerm.rpc.StdioTransport;
+import be.elevenways.sketerm.testing.SketermBuild;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -18,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Drives the installed `sketerm mcp` binary end to end, skipped when it is not on PATH.
+ * Drives a real `sketerm mcp` end to end, skipped when there is none.
  *
  * The server is mid-migration between result shapes, so every assertion here is shape-agnostic:
  * the decode rule is what turns either shape into the same {@link ToolResult}.
@@ -29,13 +31,13 @@ class SketermSessionIT {
 
     @Test
     @DisplayName("A real Sketerm server initializes, lists, pings, calls and closes")
-    void realServerJourney() {
+    void realServerJourney() throws IOException {
 
-        String binary = findSketerm();
-        assumeTrue(binary != null, "sketerm is not installed on this machine");
+        Path binary = SketermBuild.resolve(Path.of(System.getProperty("user.dir"), "build", "session-it-bin"));
+        assumeTrue(binary != null, SketermBuild.NO_SKETERM);
 
         SketermProcess process = SketermProcess.start(
-                List.of(binary, "mcp", "--tools", "browser,core"), null, null);
+                List.of(binary.toString(), "mcp", "--tools", "browser,core"), null, null);
 
         JsonRpcConnection connection = new JsonRpcConnection(new StdioTransport(process));
         connection.setTimeoutMs(CALL_TIMEOUT_MS);
@@ -83,24 +85,5 @@ class SketermSessionIT {
 
         // 7. Closing the session reaped the child
         assertFalse(process.isAlive(), "step 7: the sketerm process is gone");
-    }
-
-    private static String findSketerm() {
-
-        String path = System.getenv("PATH");
-
-        if (path == null) {
-            return null;
-        }
-
-        for (String entry : path.split(File.pathSeparator)) {
-            File candidate = new File(entry, "sketerm");
-
-            if (candidate.isFile() && candidate.canExecute()) {
-                return candidate.getAbsolutePath();
-            }
-        }
-
-        return null;
     }
 }

@@ -1,6 +1,7 @@
 package be.elevenways.sketerm.api;
 
 import be.elevenways.sketerm.json.Json;
+import be.elevenways.sketerm.testing.SketermBuild;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeAll;
@@ -9,13 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -32,11 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Drives the api layer against a real headless Sketerm, skipped when the binaries are absent.
+ * Drives the api layer against a real headless Sketerm, skipped when there is none.
  *
- * Both the server and the browser helper are COPIED to build/it-bin once at setup: the sibling
- * checkout they come from is rebuilt while this suite runs, and a binary swapped underneath a
- * running child is not a test failure worth reading.
+ * A checkout build is COPIED to build/it-bin once at setup: it may be rebuilt while this suite runs, and a binary
+ * swapped underneath a running child is not a test failure worth reading.
  */
 class PageApiIT {
 
@@ -46,84 +44,18 @@ class PageApiIT {
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(60);
     private static final long RUN_ID = ProcessHandle.current().pid();
 
-    static Path server;
-    static Path helper;
-    private static @Nullable Path mux;
+    static @Nullable Path server;
 
     @BeforeAll
     static void copyBinaries() throws IOException {
-
-        Path source = checkoutBinaries();
-        Path target = Path.of(System.getProperty("user.dir"), "build", "it-bin");
-        boolean sourcePresent = Files.exists(source.resolve("sketerm"))
-                || Files.exists(source.resolve("sketerm-webengine")) || Files.exists(source.resolve("sketerm-mux"));
-
-        server = copy(source.resolve("sketerm"), target.resolve("sketerm"));
-        helper = copy(source.resolve("sketerm-webengine"), target.resolve("sketerm-webengine"));
-        mux = copy(source.resolve("sketerm-mux"), target.resolve("sketerm-mux"));
-        if (sourcePresent) {
-            assertNotNull(server, "partial source build: missing or non-executable " + source.resolve("sketerm"));
-            assertNotNull(helper,
-                    "partial source build: missing or non-executable " + source.resolve("sketerm-webengine"));
-            assertNotNull(mux, "partial source build: missing or non-executable " + source.resolve("sketerm-mux"));
-            return;
-        }
-
-        // Without a built sibling checkout, an installed Sketerm (a package swaps it only on upgrade) is the next one.
-        if (server == null && helper == null && mux == null) {
-            Path installed = onPath("sketerm");
-            Path installedHelper = installed == null ? null : installed.resolveSibling("sketerm-webengine");
-            Path installedMux = installed == null ? null : installed.resolveSibling("sketerm-mux");
-
-            if (installedHelper != null && Files.isExecutable(installedHelper) && Files.isExecutable(installedMux)) {
-                server = installed;
-                helper = installedHelper;
-                mux = installedMux;
-            }
-        }
-    }
-
-    /**
-     * The freshly built binaries: -Dsketerm.it.bin names another build's zig-out/bin (a checkout outside the
-     * workspace, a branch under test), otherwise the sibling checkout's.
-     */
-    static Path checkoutBinaries() {
-
-        String override = System.getProperty("sketerm.it.bin");
-
-        return override != null && !override.isBlank() ? Path.of(override)
-                : Path.of(System.getProperty("user.dir")).getParent().resolve("sketerm/zig-out/bin");
-    }
-
-    /**
-     * @return the executable a bare name runs, or null when no PATH entry holds it
-     */
-    private static Path onPath(String name) {
-
-        String path = System.getenv("PATH");
-
-        if (path == null) {
-            return null;
-        }
-
-        for (String entry : path.split(File.pathSeparator)) {
-            if (!entry.isEmpty()) {
-                Path candidate = Path.of(entry, name);
-                if (Files.isExecutable(candidate)) {
-                    return candidate;
-                }
-            }
-        }
-
-        return null;
+        server = SketermBuild.resolve(Path.of(System.getProperty("user.dir"), "build", "it-bin"));
     }
 
     @Test
     @DisplayName("A real view takes trusted keys, resizes in place, mirrors its console and reviews its document")
     void reviewJourney() throws IOException {
 
-        assumeTrue(server != null, "no sketerm binary: build the sibling checkout or install sketerm");
-        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+        assumeTrue(server != null, SketermBuild.NO_SKETERM);
 
         try (Sketerm sketerm = Sketerm.launch(options("review").build())) {
 
@@ -163,8 +95,7 @@ class PageApiIT {
     @DisplayName("A real view is driven by hand and watched through its frame stream")
     void handJourney() throws IOException {
 
-        assumeTrue(server != null, "no sketerm binary: build the sibling checkout or install sketerm");
-        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+        assumeTrue(server != null, SketermBuild.NO_SKETERM);
 
         try (Sketerm sketerm = Sketerm.launch(options("hand").build())) {
 
@@ -210,8 +141,7 @@ class PageApiIT {
     @DisplayName("A real headless view opens, evaluates, snapshots, is acted on and photographed")
     void realBrowserJourney() throws IOException {
 
-        assumeTrue(server != null, "the sketerm binary is not built in the sibling checkout");
-        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+        assumeTrue(server != null, SketermBuild.NO_SKETERM);
 
         try (Sketerm sketerm = Sketerm.launch(options("journey").build())) {
 
@@ -279,8 +209,7 @@ class PageApiIT {
     @DisplayName("A view closes for real, and a named profile keeps its cookies across close and reopen")
     void closeAndProfileLifecycle() throws IOException {
 
-        assumeTrue(server != null, "the sketerm binary is not built in the sibling checkout");
-        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+        assumeTrue(server != null, SketermBuild.NO_SKETERM);
 
         try (Sketerm sketerm = Sketerm.launch(options("profiles").build())) {
 
@@ -289,9 +218,9 @@ class PageApiIT {
                     .toList();
 
             assumeTrue(tools.contains("web_close"),
-                    "the copied sketerm predates web_close (rebuild the sibling checkout: zig build)");
+                    "the copied sketerm predates web_close (rebuild the checkout: zig build)");
             assumeTrue(tools.contains("web_profiles") && tools.contains("web_profile_reset"),
-                    "the copied sketerm predates the profile tools (rebuild the sibling checkout: zig build)");
+                    "the copied sketerm predates the profile tools (rebuild the checkout: zig build)");
 
             Browser browser = sketerm.browser();
 
@@ -393,8 +322,7 @@ class PageApiIT {
     @DisplayName("A policied view enforces its allow-list, latches its budget, and captures as evidence")
     void policyAndEvidenceJourney(@TempDir Path evidenceRoot) throws IOException {
 
-        assumeTrue(server != null, "the sketerm binary is not built in the sibling checkout");
-        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+        assumeTrue(server != null, SketermBuild.NO_SKETERM);
 
         try (Sketerm sketerm = Sketerm.launch(options("policy").build())) {
 
@@ -403,8 +331,8 @@ class PageApiIT {
                     .toList();
 
             assumeTrue(tools.contains("web_policy") && tools.contains("web_policy_set"),
-                    "the copied sketerm predates enforced network policy (rebuild the sibling"
-                            + " checkout: zig build)");
+                    "the copied sketerm predates enforced network policy (rebuild the checkout:"
+                            + " zig build)");
 
             Browser browser = sketerm.browser();
             PolicyFixture fixture = PolicyFixture.start();
@@ -537,8 +465,7 @@ class PageApiIT {
     @DisplayName("A captured view keeps the JSON its page fetched, POST bodies included, and waits for the next one")
     void captureJourney(@TempDir Path out) throws IOException {
 
-        assumeTrue(server != null, "the sketerm binary is not built in the sibling checkout");
-        assumeTrue(helper != null, "sketerm-webengine is not built; run `zig build fetch-cef && zig build web`");
+        assumeTrue(server != null, SketermBuild.NO_SKETERM);
 
         try (Sketerm sketerm = Sketerm.launch(options("capture").build())) {
 
@@ -547,8 +474,8 @@ class PageApiIT {
                     .toList();
 
             assumeTrue(tools.contains("web_capture") && tools.contains("web_capture_set"),
-                    "the copied sketerm predates response-body capture (rebuild the sibling"
-                            + " checkout: zig build && zig build web)");
+                    "the copied sketerm predates response-body capture (rebuild the checkout:"
+                            + " zig build && zig build web)");
 
             Browser browser = sketerm.browser();
             assertTrue(browser.supportsCapture(), "step 31: the headless server advertises capture");
@@ -800,8 +727,8 @@ class PageApiIT {
                 .instanceName("skjava-it-" + RUN_ID + "-" + instance)
                 .defaultTimeout(CALL_TIMEOUT)
                 .env(clearedSketermEnvironment())
-                .env("SKETERM_WEB_BIN", helper.toString())
-                .env("SKETERM_MUX_BIN", mux.toString())
+                .env("SKETERM_WEB_BIN", server.resolveSibling("sketerm-webengine").toString())
+                .env("SKETERM_MUX_BIN", server.resolveSibling("sketerm-mux").toString())
                 .env("XDG_RUNTIME_DIR", runtimeDir.toString())
                 .env("XDG_STATE_HOME", state.toString());
     }
@@ -844,26 +771,5 @@ class PageApiIT {
         }
 
         return environment;
-    }
-
-    /**
-     * @return the copy, or null when the source is missing
-     */
-    private static Path copy(Path source, Path target) throws IOException {
-
-        if (!Files.isExecutable(source)) {
-            return null;
-        }
-
-        Files.createDirectories(target.getParent());
-        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
-
-        File file = target.toFile();
-
-        if (!file.setExecutable(true)) {
-            return null;
-        }
-
-        return target;
     }
 }
