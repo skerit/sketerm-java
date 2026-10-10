@@ -49,14 +49,20 @@ public record PolicyStatus(boolean active,
                 exhaustedReason, denied, durable, false);
     }
 
-    /** The server emits these enforcement facts only for a verified untrusted view. */
+    /**
+     * The server emits these enforcement facts only for a verified untrusted view. Its loader
+     * validates every address it dials on the direct route, and dials the route's proxy alone on
+     * a tor or proxy: route; the attestation must match the view's own route.
+     */
     static boolean verifiedUntrusted(Map<String, Object> structured) {
         Map<String, Object> policy = Json.optMap(structured, "policy");
         Map<String, Object> enforced = Json.optMap(structured, "enforced");
+        String route = Json.optStr(structured, "route");
+        String broker = route == null || route.equals("direct") ? "actual-address-validated" : "route-proxy-only";
         return Boolean.TRUE.equals(structured.get("policy_active"))
                 && policy != null && Boolean.TRUE.equals(policy.get("untrusted"))
                 && enforced != null && "denied".equals(enforced.get("internet_sockets"))
-                && "actual-address-validated".equals(enforced.get("http_broker"))
+                && broker.equals(enforced.get("http_broker"))
                 && Boolean.FALSE.equals(enforced.get("websockets"))
                 && Boolean.FALSE.equals(enforced.get("webrtc"));
     }

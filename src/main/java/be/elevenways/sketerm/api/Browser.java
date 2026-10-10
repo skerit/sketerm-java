@@ -66,7 +66,7 @@ public final class Browser {
             ToolCalls.put(arguments, "route", options.route());
             ToolCalls.put(arguments, "color_scheme", options.colorScheme() == null ? null : options.colorScheme().wire());
             ToolCalls.put(arguments, "max_fps", options.maxFps());
-            if (untrusted) arguments.put("route", "direct");
+            if (untrusted && options.route() == null) arguments.put("route", "direct");
 
             if (options.profile() != null) {
                 arguments.put("profile", ProfileNames.require(options.profile(), "web_open"));
@@ -97,6 +97,14 @@ public final class Browser {
                     && !options.colorScheme().wire().equals(Json.optStr(structured, "color_scheme"))) {
                 throw new ProtocolMismatchException("web_open did not acknowledge color_scheme: "
                         + options.colorScheme().wire());
+            }
+            // A view opened on another route than asked is browsing somewhere the caller did
+            // not choose; a proxy route must be confirmed outright.
+            String asked = options == null ? null : options.route();
+            String echoed = Json.optStr(structured, "route");
+            if (asked != null && (echoed != null ? !echoed.equals(asked) : Routes.isProxy(asked))) {
+                throw new ProtocolMismatchException("web_open opened the view on route " + echoed
+                        + ", not the requested " + asked);
             }
             if (untrusted) {
                 NetworkPolicy installed = NetworkPolicy.decode(structured);

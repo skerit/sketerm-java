@@ -17,7 +17,9 @@ import java.time.Duration;
  *               only, and fail-closed - a helper that cannot enforce it opens nothing
  * @param capture a response-body CAPTURE, recording from the view's first request on; headless
  *                only, and fail-closed - a helper that cannot capture opens nothing
- * @param route null uses direct; otherwise direct, tor, via:host or on:host (backend permitting)
+ * @param route null uses direct; otherwise one of {@link Routes#GRAMMAR}, backend permitting.
+ *              {@code proxy:socks5h://HOST:PORT} or {@code proxy:http://HOST:PORT} sends every
+ *              request through a forward proxy the caller runs, which resolves every host
  * @param colorScheme headless preferred colour scheme, installed before the first document; null keeps defaults
  * @param maxFps headless CEF paint cap from 1 to 240; null keeps the server's default
  */
@@ -65,17 +67,16 @@ public record OpenOptions(Integer width,
             ProfileNames.require(profile, "web_open");
         }
 
-        if (route != null && !route.equals("direct") && !route.equals("tor")
-                && !route.matches("(?:via|on):[^\\s:]+")) {
-            throw new InvalidArgsException("Unknown browser route: " + route, "web_open", false, null);
+        if (route != null) {
+            Routes.require(route);
         }
         if (policy != null && policy.requiresUntrusted()) {
             if (!ephemeral || profile != null) {
                 throw new InvalidArgsException("Untrusted policy requires ephemeral:true and no named profile",
                         "web_open", false, null);
             }
-            if (route != null && !route.equals("direct")) {
-                throw new InvalidArgsException("Untrusted policy requires the direct route",
+            if (route != null && !Routes.servesUntrusted(route)) {
+                throw new InvalidArgsException("Untrusted policy requires the direct, tor or proxy: route",
                         "web_open", false, null);
             }
         }
@@ -186,7 +187,13 @@ public record OpenOptions(Integer width,
                 this.capture, this.route, this.colorScheme, this.maxFps);
     }
 
-    /** Select a network route; untrusted policies accept direct only. */
+    /**
+     * Select a network route ({@link Routes#GRAMMAR}); untrusted policies accept direct, tor and
+     * proxy: routes.
+     *
+     * @throws InvalidArgsException when the route is outside the grammar, or an untrusted policy
+     *         cannot take it
+     */
     public OpenOptions withRoute(String route) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
                 this.capture, route, this.colorScheme, this.maxFps);

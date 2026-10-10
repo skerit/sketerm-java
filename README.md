@@ -396,12 +396,37 @@ assert page.policy().untrusted();             // fresh, correlated enforcement a
   closes the returned handle best-effort if the attestation is missing or disagrees. It never
   retries with ordinary loading. `isPolicyActive()` cannot report an unacknowledged untrusted
   install as active; `PolicyStatus.untrusted()` reports verified enforcement, not requested mode.
-- Untrusted policies require ephemeral identity, direct routing and HTTP/HTTPS-only schemes.
-  Java rejects invalid combinations with `InvalidArgsException` before a call. Mode cannot be
-  set in either direction on a live patch (omit `untrusted` entirely), and untrusted policies cannot
-  be named-profile defaults. Set `.withEphemeral()` before attaching an untrusted policy.
-- `withRoute` also accepts `tor`, `via:host` and `on:host` for ordinary views when supported by the
-  backend; unknown routes fail locally. Untrusted opens explicitly send `route:"direct"`.
+- Untrusted policies require ephemeral identity, a `direct`, `tor` or `proxy:` route and
+  HTTP/HTTPS-only schemes. Java rejects invalid combinations with `InvalidArgsException` before a
+  call. Mode cannot be set in either direction on a live patch (omit `untrusted` entirely), and
+  untrusted policies cannot be named-profile defaults. Set `.withEphemeral()` before attaching an
+  untrusted policy.
+- `withRoute` takes the grammar in `Routes.GRAMMAR`: `direct`, `tor`, `via:host`, `on:host`, or a
+  forward proxy you run, `proxy:socks5h://HOST:PORT` or `proxy:http://HOST:PORT`. Unknown routes
+  fail locally, and so do `socks5://` (it would resolve page hosts locally), credentials, paths and
+  missing ports. An untrusted open without a route sends `route:"direct"`; with one, it sends that
+  route, and `openPage` refuses (closing the view) when the server's echo names another route, or
+  names none for a proxy route.
+
+#### Proxy routes
+
+```java
+Page page = browser.openPage("http://abc.folio.localhost:4420/", OpenOptions.ephemeralIdentity()
+        .withRoute("proxy:socks5h://127.0.0.1:1080")   // or proxy:http://127.0.0.1:3128
+        .withPolicy(NetworkPolicy.builder().untrusted()
+                .allowHosts("abc.folio.localhost:4420")
+                .build()));
+```
+
+Every request of the view goes through that proxy, which resolves every host and decides what is
+reachable: a loopback render host is served through it too, there is no bypass list, and
+`allowPrivateAddresses` does not need to be set for it. SOCKS5 carries the hostname (ATYP 3); an
+HTTP proxy gets a CONNECT for https and an absolute-form request for http. An unreachable proxy fails
+the load and nothing falls back to a direct connection. In untrusted mode the restricted loader
+connects to the proxy's address alone, and the `web_policy` attestation reads
+`http_broker:"route-proxy-only"`, which `PolicyStatus.untrusted()` checks against the view's route.
+Views opened on the same proxy url share one browser instance. Needs a Sketerm build with
+`capabilities.web_route_proxy`; an older server refuses the route text and opens nothing.
 - `withColorScheme` is headless-only and requires verified `web-emulation`. Sketerm applies it
   before initial loading and requires a successful native media acknowledgement. The SDK checks
   the returned colour echo, so an older server ignoring the option fails closed with

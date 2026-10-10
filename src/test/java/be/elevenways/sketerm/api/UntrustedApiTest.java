@@ -45,7 +45,8 @@ class UntrustedApiTest {
                 OpenOptions.defaults().withPolicy(policy)), "shared identity is forbidden");
         assertThrows(InvalidArgsException.class, () -> browser.openPage("about:blank",
                 OpenOptions.inProfile("work").withPolicy(policy)), "named profile is forbidden");
-        for (String route : List.of("tor", "via:box", "on:box")) {
+        // The restricted loader dials one proxy or none: via: and on: stay refused.
+        for (String route : List.of("via:box", "on:box")) {
             assertThrows(InvalidArgsException.class, () -> browser.openPage("about:blank",
                     OpenOptions.ephemeralIdentity().withRoute(route).withPolicy(policy)), route);
             assertThrows(InvalidArgsException.class, () -> OpenOptions.ephemeralIdentity()
