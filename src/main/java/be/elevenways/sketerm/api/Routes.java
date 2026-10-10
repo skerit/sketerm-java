@@ -7,12 +7,12 @@ import java.net.InetAddress;
  * {@code via:HOST}, {@code on:HOST}, or a forward proxy the caller runs,
  * {@code proxy:socks5h://HOST:PORT} or {@code proxy:http://HOST:PORT}.
  *
- * <p>A proxy route sends every request of the view through that proxy, which resolves every host
+ * A proxy route sends every request of the view through that proxy, which resolves every host
  * and decides what is reachable: a loopback or private origin is reached through it too, there is
  * no bypass list. {@code socks5://} is refused because it would resolve the page host locally;
  * credentials, paths, PAC files and a missing or zero port are refused as well. It is checked
  * client-side for the same reason {@link PolicyHosts} is: the server refuses fail-closed, and a
- * refusal found before the call stays local.</p>
+ * refusal found before the call stays local.
  */
 public final class Routes {
 
