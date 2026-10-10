@@ -283,7 +283,8 @@ class CaptureApiTest {
                 "a host with a scheme");
         assertThrows(InvalidArgsException.class, () -> CaptureFilter.builder().methods("GET /").build(),
                 "a method that is not one");
-        assertThrows(InvalidArgsException.class, () -> CaptureFilter.builder().mimePrefixes("text/html; charset").build(),
+        assertThrows(InvalidArgsException.class, () -> CaptureFilter.builder()
+                .mimePrefixes("text/html; charset").build(),
                 "a mime prefix with a parameter");
         assertThrows(InvalidArgsException.class, () -> CaptureFilter.builder().urlContains("").build(),
                 "an empty url_contains, which restricts nothing and says so");
@@ -348,7 +349,8 @@ class CaptureApiTest {
         Map<String, Object> out = new LinkedHashMap<>();
 
         for (Map.Entry<String, Object> entry : ((Map<String, Object>) value).entrySet()) {
-            out.put(entry.getKey(), entry.getValue() instanceof Number number ? (Object) number.longValue() : entry.getValue());
+            out.put(entry.getKey(), entry.getValue() instanceof Number number ? (Object) number.longValue()
+                    : entry.getValue());
         }
 
         return out;

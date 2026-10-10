@@ -59,7 +59,8 @@ class PageApiIT {
 
         try (Sketerm sketerm = Sketerm.launch(options("review").build())) {
 
-            Page page = sketerm.browser().openPage(REVIEW_PAGE, OpenOptions.ephemeralIdentity().withViewport(1024, 768));
+            Page page = sketerm.browser().openPage(REVIEW_PAGE, OpenOptions.ephemeralIdentity()
+                    .withViewport(1024, 768));
 
             // 1. Two trusted Tabs move focus past the link onto the button, as a keyboard user's would
             KeyResult keys = page.key("Tab Tab");

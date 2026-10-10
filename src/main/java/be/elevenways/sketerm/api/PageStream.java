@@ -140,7 +140,8 @@ public final class PageStream implements AutoCloseable {
         try {
             channel = SocketChannel.open(StandardProtocolFamily.UNIX);
             channel.connect(UnixDomainSocketAddress.of(path));
-            PageStream stream = new PageStream(channel, listener, owner, Boolean.TRUE.equals(facts.get("audio")), route);
+            PageStream stream = new PageStream(channel, listener, owner,
+                    Boolean.TRUE.equals(facts.get("audio")), route);
             stream.send(1, token.getBytes(StandardCharsets.UTF_8));
             return stream;
         } catch (IOException | RuntimeException failure) {

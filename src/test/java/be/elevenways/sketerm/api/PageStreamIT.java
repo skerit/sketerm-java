@@ -109,7 +109,8 @@ class PageStreamIT {
             stream.key(KeyAction.PRESS, KeyCode.KEY_A);
             stream.input(InputEvent.text("bc"));
             assertEquals("abc", page.evaluate("new Promise(r=>{const t=()=>inp.value.length>=3?r(inp.value)"
-                    + ":setTimeout(t,20);t()})", true, Duration.ofSeconds(5)), "step 2: keys and text reached the field");
+                    + ":setTimeout(t,20);t()})", true, Duration.ofSeconds(5)),
+                    "step 2: keys and text reached the field");
             page.evaluate("inp.blur(),1");
             quiet(paints, stream);
 

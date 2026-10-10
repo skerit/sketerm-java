@@ -64,7 +64,8 @@ public final class Browser {
             ToolCalls.put(arguments, "height", options.height());
             ToolCalls.putTimeout(arguments, options.timeout());
             ToolCalls.put(arguments, "route", options.route());
-            ToolCalls.put(arguments, "color_scheme", options.colorScheme() == null ? null : options.colorScheme().wire());
+            ToolCalls.put(arguments, "color_scheme", options.colorScheme() == null ? null
+                    : options.colorScheme().wire());
             ToolCalls.put(arguments, "max_fps", options.maxFps());
             if (untrusted && options.route() == null) arguments.put("route", "direct");
 
