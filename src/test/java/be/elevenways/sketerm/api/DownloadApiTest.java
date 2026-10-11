@@ -48,7 +48,7 @@ class DownloadApiTest {
             if (arguments.containsKey("url")) {
                 return facts(map("downloads", List.of(
                                 entry("https://example.test/report.pdf", "/tmp/report.pdf", "done",
-                                4096, "abc123", null)),
+                                        4096, "abc123", null)),
                         "completed", 1, "failed", 0, "unfinished", 0,
                         "path", "/tmp/report.pdf", "state", "done", "bytes", 4096, "sha256", "abc123"));
             }

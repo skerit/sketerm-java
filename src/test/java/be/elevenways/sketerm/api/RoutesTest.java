@@ -106,7 +106,7 @@ class RoutesTest {
         mismatched.on("web_open", opening(route)).on("web_policy", direct).on("web_close", Map.of("closed", true));
         assertThrows(ProtocolMismatchException.class, () -> mismatched.browser().openPage("about:blank",
                 OpenOptions.ephemeralIdentity().withRoute(route).withPolicy(NetworkPolicy.builder().untrusted()
-                .build())));
+                        .build())));
         assertEquals(1, mismatched.callsTo("web_close").size());
 
         // Without a route the untrusted open still names direct explicitly.
