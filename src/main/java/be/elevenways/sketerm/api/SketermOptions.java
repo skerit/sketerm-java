@@ -19,6 +19,12 @@ public final class SketermOptions {
     /** The groups the api layer needs: browser for web_*, core for capabilities. */
     public static final String DEFAULT_TOOL_GROUPS = "browser,core";
 
+    /**
+     * Asks the server for structuredContent on every result, which this client reads; a server
+     * started without it answers text only.
+     */
+    public static final String STRUCTURED_FLAG = "--structured";
+
     private final String binaryPath;
     private final String toolGroups;
     private final String instanceName;
@@ -43,7 +49,8 @@ public final class SketermOptions {
     }
 
     /**
-     * The default launch: `sketerm mcp --tools browser,core` with the JVM's own cwd and environment.
+     * The default launch: `sketerm mcp --structured --tools browser,core` with the JVM's own cwd and
+     * environment.
      */
     public static SketermOptions defaults() {
         return builder().build();
@@ -90,10 +97,26 @@ public final class SketermOptions {
      * @return the full argv, the executable first
      */
     public List<String> command() {
+        return this.argv(true);
+    }
+
+    /**
+     * {@link #command()} without {@link #STRUCTURED_FLAG}, for a server that predates the flag: such a
+     * server refuses it as an unknown flag, and always sends structuredContent anyway.
+     */
+    public List<String> legacyCommand() {
+        return this.argv(false);
+    }
+
+    private List<String> argv(boolean structured) {
 
         List<String> command = new ArrayList<>();
         command.add(this.binaryPath);
         command.add("mcp");
+
+        if (structured) {
+            command.add(STRUCTURED_FLAG);
+        }
 
         if (this.toolGroups != null && !this.toolGroups.isBlank()) {
             command.add("--tools");

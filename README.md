@@ -27,9 +27,17 @@ Sketerm has two structured-result shapes in the wild, so `ToolResult.decode` app
    a JSON object, adopt that (what the installed 0.1.3 build emits);
 3. otherwise the result is prose only and `structured()` is null.
 
+A current `sketerm mcp` answers text only unless it runs with `--structured`, so
+`SketermOptions.command()` always passes it. A server older than the flag refuses it as an unknown
+flag (exit 2) before it speaks MCP, and `Sketerm.launch` relaunches it once with
+`legacyCommand()`; such a server sends `structuredContent` anyway. A prose-only answer where the api
+layer needs facts is a `ProtocolMismatchException` that names the flag.
+
 Tool failures arrive as a successful JSON-RPC result carrying `isError`, a channel distinct from
 a JSON-RPC error object. `ToolResult.orThrow(name)` turns one into a `ToolException`, reading
 `structuredContent.error`'s `code`, `message` and `retryable` when the newer server shape is present.
+A text-only error reads `error CODE: message` (` (retryable)` after a retryable code), which gives
+the same code and flag.
 
 ## Usage
 

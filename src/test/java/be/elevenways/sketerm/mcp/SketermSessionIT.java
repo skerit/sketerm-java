@@ -1,14 +1,15 @@
 package be.elevenways.sketerm.mcp;
 
+import be.elevenways.sketerm.api.Sketerm;
+import be.elevenways.sketerm.api.SketermOptions;
 import be.elevenways.sketerm.process.SketermProcess;
-import be.elevenways.sketerm.rpc.JsonRpcConnection;
-import be.elevenways.sketerm.rpc.StdioTransport;
 import be.elevenways.sketerm.testing.SketermBuild;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -23,7 +24,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * Drives a real `sketerm mcp` end to end, skipped when there is none.
  *
  * The server is mid-migration between result shapes, so every assertion here is shape-agnostic:
- * the decode rule is what turns either shape into the same {@link ToolResult}.
+ * the decode rule is what turns either shape into the same {@link ToolResult}. The launch is
+ * {@link Sketerm#launch}'s, so a current server answers structured and an older one is relaunched
+ * without the flag it refuses.
  */
 class SketermSessionIT {
 
@@ -36,13 +39,13 @@ class SketermSessionIT {
         Path binary = SketermBuild.resolve(Path.of(System.getProperty("user.dir"), "build", "session-it-bin"));
         assumeTrue(binary != null, SketermBuild.NO_SKETERM);
 
-        SketermProcess process = SketermProcess.start(
-                List.of(binary.toString(), "mcp", "--tools", "browser,core"), null, null);
+        Sketerm sketerm = Sketerm.launch(SketermOptions.builder()
+                .binaryPath(binary.toString())
+                .defaultTimeout(Duration.ofMillis(CALL_TIMEOUT_MS))
+                .build());
+        SketermProcess process = sketerm.process();
 
-        JsonRpcConnection connection = new JsonRpcConnection(new StdioTransport(process));
-        connection.setTimeoutMs(CALL_TIMEOUT_MS);
-
-        try (McpSession session = McpSession.initialize(connection)) {
+        try (McpSession session = sketerm.session()) {
 
             // 1. The handshake succeeded and the server identified itself
             assertNotNull(session.getServerName(), "step 1: the server has a name");

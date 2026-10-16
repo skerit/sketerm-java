@@ -132,6 +132,16 @@ public final class SketermProcess implements AutoCloseable {
         return outcome == null ? null : outcome.exitCode();
     }
 
+    /**
+     * @return the child's exit code once it exits within {@code millis}, else null
+     */
+    public Integer exitCodeWithin(long millis) {
+
+        ProcessOutcome outcome = this.outcomeWithin(millis);
+
+        return outcome == null ? null : outcome.exitCode();
+    }
+
     public BufferedWriter getStdin() {
         return this.stdin;
     }

@@ -3,14 +3,21 @@ package be.elevenways.sketerm.mcp;
 import be.elevenways.sketerm.json.Json;
 
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * A tool that answered with isError, the failure channel distinct from a JSON-RPC error.
  *
- * The newer server shape puts a machine-readable failure under structuredContent.error; when it
- * is absent the code and retryable flag are null and only the prose survives.
+ * The structured shape puts a machine-readable failure under structuredContent.error. A server
+ * answering text only starts the text with "error CODE: " (" (retryable)" after a retryable code),
+ * which is read the same way; with neither the code and retryable flag are null.
  */
 public class ToolException extends RuntimeException {
+
+    /** A text-only result's error line: code, optional retryable marker, message. */
+    private static final Pattern TEXT_ERROR =
+            Pattern.compile("^error ([a-z_]+)( \\(retryable\\))?: (.*)$", Pattern.DOTALL);
 
     private final String toolName;
     private final String code;
@@ -54,6 +61,16 @@ public class ToolException extends RuntimeException {
 
             if (rawRetryable instanceof Boolean b) {
                 retryable = b;
+            }
+        }
+
+        if (error == null && message != null) {
+            Matcher line = TEXT_ERROR.matcher(message);
+
+            if (line.matches()) {
+                code = line.group(1);
+                retryable = line.group(2) != null;
+                message = line.group(3);
             }
         }
 

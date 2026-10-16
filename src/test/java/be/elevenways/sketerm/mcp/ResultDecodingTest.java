@@ -113,6 +113,30 @@ class ResultDecodingTest {
     }
 
     @Test
+    @DisplayName("A text-only server's error line carries the code and the retryable marker")
+    void textErrorDecode() {
+
+        ToolResult timeout = ToolResult.decode(Json.parseObject(
+                "{\"content\":[{\"type\":\"text\",\"text\":\"error timeout (retryable): did not settle\"}],"
+                        + "\"isError\":true}"));
+
+        ToolException failure = assertThrows(ToolException.class, () -> timeout.orThrow("web_wait"));
+
+        assertFalse(timeout.hasStructured(), "a text-only result has no structured payload");
+        assertEquals("timeout", failure.getCode(), "the code is read off the error line");
+        assertEquals(Boolean.TRUE, failure.getRetryable(), "and the retryable marker");
+        assertTrue(failure.getMessage().endsWith(": did not settle (retryable: true)"), "the message is the rest");
+
+        ToolResult missing = ToolResult.decode(Json.parseObject(
+                "{\"content\":[{\"type\":\"text\",\"text\":\"error not_found: no web view with id 4\"}],"
+                        + "\"isError\":true}"));
+        ToolException notFound = ToolException.of("web_read", missing);
+
+        assertEquals("not_found", notFound.getCode(), "a code without the marker");
+        assertEquals(Boolean.FALSE, notFound.getRetryable(), "is not retryable");
+    }
+
+    @Test
     @DisplayName("A result with no content at all decodes to an empty, non-error result")
     void emptyResult() {
 

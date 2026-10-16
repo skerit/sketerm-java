@@ -125,9 +125,11 @@ final class ToolCalls {
 
         if (!result.hasStructured()) {
             throw new ProtocolMismatchException("The tool '" + tool + "' answered with prose only;"
-                    + " this client needs structuredContent. The server predates the result-shape"
-                    + " migration, or the tool declares no outputSchema. Arguments were "
-                    + arguments + ", the prose was: " + result.text());
+                    + " this client needs structuredContent. A Sketerm that knows "
+                    + SketermOptions.STRUCTURED_FLAG + " answers text only unless it was started with it"
+                    + " (an MCP server reached without SketermOptions.command(), or a wrapper that drops"
+                    + " the flag); an older one predates the result-shape migration, or the tool declares"
+                    + " no outputSchema. Arguments were " + arguments + ", the prose was: " + result.text());
         }
 
         return result.structured();

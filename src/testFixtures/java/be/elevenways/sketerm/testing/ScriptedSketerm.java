@@ -206,7 +206,8 @@ public final class ScriptedSketerm implements AutoCloseable {
     }
 
     /**
-     * Script a tool that answers with prose only, the pre-migration shape.
+     * Script a tool that answers with prose only: the pre-migration shape, or what a current server
+     * started without --structured answers.
      */
     public ScriptedSketerm prose(String tool, String text) {
 

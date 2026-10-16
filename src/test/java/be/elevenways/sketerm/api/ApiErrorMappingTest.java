@@ -144,6 +144,7 @@ class ApiErrorMappingTest {
 
         assertTrue(failure.getMessage().contains("web_open"), "the failing tool is named");
         assertTrue(failure.getMessage().contains("structuredContent"), "and the missing shape");
+        assertTrue(failure.getMessage().contains(SketermOptions.STRUCTURED_FLAG), "and the flag that asks for it");
     }
 
     @Test

@@ -7,6 +7,7 @@ import be.elevenways.sketerm.rpc.SketermTransport;
 import be.elevenways.sketerm.rpc.StdioTransport;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * A launched Sketerm server: process, transport, connection and session composed as one closeable.
@@ -15,6 +16,12 @@ import java.time.Duration;
  * force-kill.
  */
 public final class Sketerm implements AutoCloseable {
+
+    /** What `sketerm mcp` prints and exits with for a flag it does not know (since 2026-07). */
+    private static final String UNKNOWN_FLAG_MESSAGE = "sketerm mcp: unknown flag";
+    private static final int UNKNOWN_FLAG_EXIT = 2;
+    /** Its stdout closing (the handshake's failure) races its exit status. */
+    private static final long UNKNOWN_FLAG_EXIT_WAIT_MS = 2_000;
 
     private final SketermOptions options;
     private final SketermProcess process;
@@ -47,12 +54,26 @@ public final class Sketerm implements AutoCloseable {
     /**
      * Spawn the child and complete the MCP handshake.
      *
+     * A server that predates {@link SketermOptions#STRUCTURED_FLAG} refuses it as an unknown flag
+     * before it speaks MCP (exit 2), so that one refusal relaunches it with
+     * {@link SketermOptions#legacyCommand()}: such a server always sends structuredContent.
+     *
      * @throws be.elevenways.sketerm.process.SketermProcessException when the binary cannot start
      * @throws be.elevenways.sketerm.mcp.McpException when the handshake fails
      */
     public static Sketerm launch(SketermOptions options) {
 
-        SketermProcess process = SketermProcess.start(options.command(),
+        Sketerm sketerm = start(options, options.command(), true);
+
+        return sketerm != null ? sketerm : start(options, options.legacyCommand(), false);
+    }
+
+    /**
+     * @return null when {@code flagMayBeUnknown} and the child refused the structured flag as unknown
+     */
+    private static Sketerm start(SketermOptions options, List<String> command, boolean flagMayBeUnknown) {
+
+        SketermProcess process = SketermProcess.start(command,
                 options.workingDirectory(),
                 options.environment());
 
@@ -67,9 +88,26 @@ public final class Sketerm implements AutoCloseable {
         try {
             return new Sketerm(options, process, connection, McpSession.initialize(connection));
         } catch (RuntimeException e) {
+            boolean refused = flagMayBeUnknown && refusedAsUnknownFlag(process);
             connection.close();
+
+            if (refused) {
+                return null;
+            }
+
             throw e;
         }
+    }
+
+    /**
+     * Whether the child exited the way an older `sketerm mcp` answers any flag it does not know.
+     */
+    static boolean refusedAsUnknownFlag(SketermProcess process) {
+
+        Integer code = process.exitCodeWithin(UNKNOWN_FLAG_EXIT_WAIT_MS);
+
+        return code != null && code == UNKNOWN_FLAG_EXIT
+                && process.getStderrTail().stream().anyMatch(line -> line.contains(UNKNOWN_FLAG_MESSAGE));
     }
 
     /**
