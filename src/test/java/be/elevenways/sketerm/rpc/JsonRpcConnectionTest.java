@@ -4,6 +4,7 @@ import be.elevenways.sketerm.json.Json;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -114,9 +115,7 @@ class JsonRpcConnectionTest {
             caller.start();
 
             // Let the request reach the transport before the stream dies.
-            while (transport.getSent().isEmpty()) {
-                Thread.sleep(5);
-            }
+            transport.awaitFirstSent(Duration.ofSeconds(5));
 
             transport.endOfStream();
             caller.join(5_000);
@@ -150,9 +149,7 @@ class JsonRpcConnectionTest {
             caller.setUncaughtExceptionHandler((t, e) -> failure.set(e));
             caller.start();
 
-            while (transport.getSent().isEmpty()) {
-                Thread.sleep(5);
-            }
+            transport.awaitFirstSent(Duration.ofSeconds(5));
 
             transport.push("not-json");
             caller.join(5_000);
@@ -174,9 +171,7 @@ class JsonRpcConnectionTest {
         caller.setUncaughtExceptionHandler((t, e) -> failure.set(e));
         caller.start();
 
-        while (transport.getSent().isEmpty()) {
-            Thread.sleep(5);
-        }
+        transport.awaitFirstSent(Duration.ofSeconds(5));
 
         connection.close();
         caller.join(1_000);

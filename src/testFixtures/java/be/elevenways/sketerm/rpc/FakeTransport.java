@@ -2,8 +2,12 @@ package be.elevenways.sketerm.rpc;
 
 import be.elevenways.sketerm.json.Json;
 
+import be.elevenways.protoblast.common.time.Pace;
+
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Function;
@@ -21,6 +25,7 @@ public final class FakeTransport implements SketermTransport {
     private final Function<Map<String, Object>, String> responder;
     private final LinkedBlockingQueue<String> inbound = new LinkedBlockingQueue<>();
     private final List<String> sent = new CopyOnWriteArrayList<>();
+    private final CompletableFuture<String> firstSent = new CompletableFuture<>();
 
     private volatile String failureContext = "fake transport";
     private volatile boolean closed;
@@ -31,6 +36,16 @@ public final class FakeTransport implements SketermTransport {
 
     public List<String> getSent() {
         return this.sent;
+    }
+
+    /**
+     * Waits until the client sent its first frame.
+     *
+     * @return that frame
+     * @throws Exception when nothing was sent within the wait
+     */
+    public String awaitFirstSent(Duration within) throws Exception {
+        return Pace.await(this.firstSent, within);
     }
 
     public void setFailureContext(String failureContext) {
@@ -55,6 +70,7 @@ public final class FakeTransport implements SketermTransport {
         }
 
         this.sent.add(message);
+        this.firstSent.complete(message);
 
         String answer = this.responder.apply(Json.parseObject(message));
 
