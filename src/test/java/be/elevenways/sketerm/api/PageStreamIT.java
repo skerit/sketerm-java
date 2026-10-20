@@ -128,7 +128,14 @@ class PageStreamIT {
             assertNotNull(merged, "step 3: the ACK opens the window again");
             assertTrue(merged.solid(255, 255, 0), "step 3: the first frame after the stall is the newest yellow");
             stream.ack(merged.serial());
-            assertNull(paints.frames.poll(300, TimeUnit.MILLISECONDS), "step 3: the stalled paints were not queued");
+            // AIDEV-NOTE: CEF may repaint the unchanged surface once more after the stall (measured: a second
+            // whole-surface yellow paint 200-300ms later), so a later frame is allowed; a queued stalled paint
+            // would carry an older hue.
+            Painted later;
+            while ((later = paints.frames.poll(300, TimeUnit.MILLISECONDS)) != null) {
+                stream.ack(later.serial());
+                assertTrue(later.solid(255, 255, 0), "step 3: the stalled paints were not queued");
+            }
             repaint(page, "veil.style.display='none'");
             quiet(paints, stream);
 

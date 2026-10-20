@@ -272,6 +272,8 @@ if (browser.supportsProfiles()) {
 
     // Its own cookie jar and cache; logins survive the close and a server restart
     Page work = browser.openPage("https://example.com/", OpenOptions.inProfile("work"));
+    // ... sign in, then commit every persistent jar to disk while the view stays open
+    browser.saveProfiles();
     work.close();
 
     // A throwaway identity instead, destroyed with the view

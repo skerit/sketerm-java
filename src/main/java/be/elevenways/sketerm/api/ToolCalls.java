@@ -119,17 +119,24 @@ final class ToolCalls {
     }
 
     /**
+     * AIDEV-NOTE: the message names the tool and its argument NAMES only. Argument values and the server's prose can
+     * carry what a caller typed (a web_act set_value password), and exception text reaches logs.
+     *
      * @throws ProtocolMismatchException when the result carried no machine-readable payload
      */
     Map<String, Object> structured(String tool, Map<String, Object> arguments, ToolResult result) {
 
         if (!result.hasStructured()) {
+            String prose = result.text();
             throw new ProtocolMismatchException("The tool '" + tool + "' answered with prose only;"
                     + " this client needs structuredContent. A Sketerm that knows "
                     + SketermOptions.STRUCTURED_FLAG + " answers text only unless it was started with it"
                     + " (an MCP server reached without SketermOptions.command(), or a wrapper that drops"
                     + " the flag); an older one predates the result-shape migration, or the tool declares"
-                    + " no outputSchema. Arguments were " + arguments + ", the prose was: " + result.text());
+                    + " no outputSchema. The call named the arguments "
+                    + (arguments == null ? "[]" : arguments.keySet()) + "; the prose answer ("
+                    + (prose == null ? 0 : prose.length()) + " characters) is not repeated, since it may echo"
+                    + " what was typed.");
         }
 
         return result.structured();

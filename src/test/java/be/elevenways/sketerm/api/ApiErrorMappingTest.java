@@ -148,6 +148,26 @@ class ApiErrorMappingTest {
     }
 
     @Test
+    @DisplayName("A mismatch names the tool and its argument names, never a value that was typed")
+    void mismatchNeverEchoesTypedValues() {
+
+        String secret = "hunter2-marker-5c1e";
+        FakeSketermServer server = new FakeSketermServer();
+        server.on("web_open", facts(map("view", 7, "settled", true, "document", 1, "revision", 1, "snapshot", TREE)));
+        server.prose("web_act", "set the value of [2] to " + secret);
+
+        Page page = server.browser().openPage("https://example.test/");
+        Ref field = page.lastSnapshot().find("Press").orElseThrow();
+
+        ProtocolMismatchException failure = assertThrows(ProtocolMismatchException.class,
+                () -> page.fill(field, secret));
+
+        assertFalse(failure.getMessage().contains(secret), "the typed value is never echoed: " + failure.getMessage());
+        assertTrue(failure.getMessage().contains("web_act"), "the failing tool is named");
+        assertTrue(failure.getMessage().contains("value"), "and so are the argument names");
+    }
+
+    @Test
     @DisplayName("A structured answer without a view handle is refused by name too")
     void missingHandleIsRefused() {
 

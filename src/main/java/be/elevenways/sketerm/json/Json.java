@@ -1,6 +1,7 @@
 package be.elevenways.sketerm.json;
 
 import be.elevenways.protoblast.common.dry.Dry;
+import be.elevenways.protoblast.common.dry.ParserInputException;
 
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,11 @@ public final class Json {
     /**
      * Parse one JSON document that must be an object.
      *
+     * AIDEV-NOTE: failures name the text's length, the failure's type and its position, never its content: a wire
+     * line can carry page text or a value someone typed, and exception text reaches logs. The parser's own exception
+     * is not chained for that reason: its message and reason quote the input around the failure and single tokens.
+     * The same holds for every message built by describe.
+     *
      * @throws JsonException when the text is unparseable or is not a JSON object
      */
     @SuppressWarnings("unchecked")
@@ -34,14 +40,20 @@ public final class Json {
 
         try {
             parsed = DRY.parse(text);
+        } catch (ParserInputException e) {
+            throw new JsonException(e.position() < 0
+                    ? "Malformed JSON (" + text.length() + " characters)"
+                    : "Malformed JSON at position " + e.position() + " (line " + e.line() + ", column " + e.column()
+                            + ") of " + text.length() + " characters");
         } catch (RuntimeException e) {
-            throw new JsonException("Failed to parse JSON: " + snippet(text), e);
+            throw new JsonException("Failed to parse JSON (" + text.length() + " characters): "
+                    + e.getClass().getSimpleName());
         }
 
         if (!(parsed instanceof Map)) {
             throw new JsonException("Expected a JSON object but got "
                     + (parsed == null ? "null" : parsed.getClass().getSimpleName())
-                    + ": " + snippet(text));
+                    + " (" + text.length() + " characters)");
         }
 
         return (Map<String, Object>) parsed;
@@ -279,10 +291,6 @@ public final class Json {
             return "null";
         }
 
-        return value.getClass().getSimpleName() + " (" + snippet(String.valueOf(value)) + ")";
-    }
-
-    private static String snippet(String text) {
-        return text.length() <= 200 ? text : text.substring(0, 200) + "...";
+        return value.getClass().getSimpleName();
     }
 }

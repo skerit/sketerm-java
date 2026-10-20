@@ -2,6 +2,7 @@ package be.elevenways.sketerm.api;
 
 import be.elevenways.sketerm.json.Json;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -227,6 +228,32 @@ public final class Browser {
         arguments.put("profile", ProfileNames.require(name, "web_profile_reset"));
 
         return ProfileResetResult.decode(this.calls.structured("web_profile_reset", arguments));
+    }
+
+    /**
+     * Commit every persistent jar (each named profile's cookies and logins, and this instance's own) to disk now,
+     * while the views stay open; a crash afterwards keeps them.
+     *
+     * Site storage (localStorage) keeps the engine's own cadence. Headless only.
+     *
+     * @throws UnavailableException with a GUI attached, or when the browser helper cannot flush on request
+     * @throws TimeoutException when the engine did not confirm the flush in time; the save is then unconfirmed
+     */
+    public ProfileSaveResult saveProfiles() {
+        return this.saveProfiles(null);
+    }
+
+    /**
+     * @param timeout how long the server waits for the engine's confirmation, null for its default (10s); the server
+     *                clamps it at 120s
+     * @see #saveProfiles()
+     */
+    public ProfileSaveResult saveProfiles(Duration timeout) {
+
+        Map<String, Object> arguments = ToolCalls.args();
+        ToolCalls.putTimeout(arguments, timeout);
+
+        return ProfileSaveResult.decode(this.calls.structured("web_profile_save", arguments));
     }
 
     /**

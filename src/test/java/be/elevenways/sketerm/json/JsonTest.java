@@ -74,7 +74,7 @@ class JsonTest {
     @DisplayName("Typed getters fail loudly and name the key")
     void gettersFailLoudly() {
 
-        Map<String, Object> map = Json.parseObject("{\"name\":\"web_open\",\"count\":3}");
+        Map<String, Object> map = Json.parseObject("{\"name\":\"hunter2-marker\",\"count\":3}");
 
         JsonException missing = assertThrows(JsonException.class, () -> Json.str(map, "absent"),
                 "an absent key refuses");
@@ -84,6 +84,7 @@ class JsonTest {
                 "a wrong type refuses");
         assertTrue(wrongType.getMessage().contains("name"), "the message names the key");
         assertTrue(wrongType.getMessage().contains("array"), "the message names the expectation");
+        assertFalse(wrongType.getMessage().contains("hunter2-marker"), "but never the value, which may be typed");
 
         assertThrows(JsonException.class, () -> Json.boolVal(map, "count"),
                 "a number is not a boolean");
@@ -94,8 +95,25 @@ class JsonTest {
     void parseRefusesNonObjects() {
 
         assertThrows(JsonException.class, () -> Json.parseObject("[1,2,3]"), "an array is not an object");
-        assertThrows(JsonException.class, () -> Json.parseObject("{oops"), "garbage refuses");
+        JsonException garbage = assertThrows(JsonException.class, () -> Json.parseObject("{oops hunter2-marker"),
+                "garbage refuses");
+        assertFalse(garbage.getMessage().contains("hunter2-marker"), "without repeating the wire text");
         assertThrows(JsonException.class, () -> Json.parseObject(null), "null refuses");
+    }
+
+    @Test
+    @DisplayName("A malformed line never puts its text into the exception or any cause")
+    void malformedLineKeepsItsText() {
+
+        String line = "{\"password\":\"Zq-marker-91\" ! \"next\":1}";
+        JsonException refused = assertThrows(JsonException.class, () -> Json.parseObject(line),
+                "a stray token refuses");
+        assertTrue(refused.getMessage().matches("Malformed JSON at position \\d+ \\(line 1, column \\d+\\) of 38 characters"),
+                "the message names where it failed");
+        for (Throwable t = refused; t != null; t = t.getCause()) {
+            String message = t.getMessage();
+            assertFalse(message != null && message.contains("Zq-marker"), "no message in the chain quotes the line");
+        }
     }
 
     @Test

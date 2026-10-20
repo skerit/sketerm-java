@@ -3,6 +3,7 @@ package be.elevenways.sketerm.api;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -220,6 +221,35 @@ class ProfileApiTest {
         server.onError("web_profile_reset", "not_found", "no profile named 'gone'", false);
         assertThrows(NotFoundException.class, () -> browser.resetProfile("gone"),
                 "an unknown name is a not_found");
+    }
+
+    @Test
+    @DisplayName("A save commits every jar on request, its timeout going out as milliseconds")
+    void savesProfiles() {
+
+        FakeSketermServer server = new FakeSketermServer();
+
+        server.on("web_profile_save", map("saved", true, "engine_running", true,
+                "profiles", List.of("work", "bank"), "store", "/state/sketerm/web-profiles"));
+
+        Browser browser = server.browser();
+        ProfileSaveResult saved = browser.saveProfiles(Duration.ofSeconds(20));
+
+        assertEquals(20_000L, ((Number) server.lastArguments("web_profile_save").get("timeout_ms")).longValue(),
+                "the timeout went out");
+        assertTrue(saved.engineRunning(), "a live engine flushed");
+        assertEquals(List.of("work", "bank"), saved.profiles(), "every saved profile is listed");
+        assertEquals("/state/sketerm/web-profiles", saved.store(), "with the store they went to");
+
+        server.on("web_profile_save", map("saved", true, "engine_running", false, "profiles", List.of()));
+        ProfileSaveResult idle = browser.saveProfiles();
+
+        assertNull(server.lastArguments("web_profile_save").get("timeout_ms"), "no timeout keeps the server's");
+        assertFalse(idle.engineRunning(), "no engine held anything in memory");
+        assertNull(idle.store(), "and no store was named");
+
+        server.onError("web_profile_save", "unavailable", "this browser helper cannot flush its jars on request", false);
+        assertThrows(UnavailableException.class, browser::saveProfiles, "a helper without flush-store says so");
     }
 
     @Test
