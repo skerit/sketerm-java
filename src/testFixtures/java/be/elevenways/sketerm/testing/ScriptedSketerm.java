@@ -11,9 +11,15 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +48,12 @@ public final class ScriptedSketerm implements AutoCloseable {
 
     /** The 1x1 JPEG the {@link #browser()} preset answers a jpeg web_frame with. */
     public static final byte[] PIXEL_JPEG = pixelJpeg();
+
+    /** The one-page PDF (a 1440x810pt sheet) the {@link #browser()} preset prints every web_print_pdf as. */
+    public static final byte[] PRINTED_PDF = ("%PDF-1.4\n1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n"
+            + "2 0 obj <</Type /Pages /Kids [3 0 R] /Count 1>> endobj\n"
+            + "3 0 obj <</Type /Page /Parent 2 0 R /MediaBox [0 0 1440 810]>> endobj\n"
+            + "trailer <</Root 1 0 R>>\n%%EOF\n").getBytes(StandardCharsets.US_ASCII);
 
     private final Map<String, Function<Map<String, Object>, Map<String, Object>>> tools = new LinkedHashMap<>();
     private final List<Call> calls = new CopyOnWriteArrayList<>();
@@ -114,7 +126,8 @@ public final class ScriptedSketerm implements AutoCloseable {
         server.on("capabilities", arguments -> map("web", true, "web_backend", "headless", "web_profiles", true,
                 "web_capture", true, "web_downloads", true, "web_untrusted", true, "web_policy_ack", true,
                 "web_input", true, "web_frames", true, "web_stream", server.streamsEnabled,
-                "web_max_fps", true, "web_default_max_fps", 60));
+                "web_max_fps", true, "web_default_max_fps", 60, "web_print_pdf", true,
+                "web_print_pdf_css_page", true));
         server.on("web_open", server::open);
         server.on("web_tabs", arguments -> server.tabs());
         server.on("web_close", server::close);
@@ -124,6 +137,7 @@ public final class ScriptedSketerm implements AutoCloseable {
         server.on("web_wait", arguments -> server.viewFacts(arguments, map("waited_for", arguments.get("for"))));
         server.on("web_input", server::input);
         server.on("web_frame", server::frame);
+        server.on("web_print_pdf", server::print);
 
         return server;
     }
@@ -452,6 +466,30 @@ public final class ScriptedSketerm implements AutoCloseable {
         answer.putAll(extra);
 
         return answer;
+    }
+
+    /** Writes {@link #PRINTED_PDF} where web_print_pdf was told to, as the helper writes its file. */
+    private Map<String, Object> print(Map<String, Object> arguments) {
+
+        Path path = Path.of(Json.str(arguments, "path"));
+
+        try {
+            Files.write(path, PRINTED_PDF);
+        } catch (IOException failure) {
+            return errorPayload("io_failed", "Could not write " + path + ": " + failure.getMessage());
+        }
+
+        String sha256;
+        try {
+            sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(PRINTED_PDF));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+
+        return this.viewFacts(arguments, map("path", path.toString(), "bytes", PRINTED_PDF.length,
+                "sha256", sha256, "paper", "default",
+                "css_page_size", Boolean.TRUE.equals(arguments.get("css_page_size")),
+                "no_margins", Boolean.TRUE.equals(arguments.get("no_margins"))));
     }
 
     private Map<String, Object> view(Map<String, Object> arguments) {

@@ -339,6 +339,23 @@ public final class Browser {
     }
 
     /**
+     * Preflight: whether {@link Page#printPdf} can print a view on the sheet its CSS {@code @page} rule sizes, without
+     * engine margins ({@link PrintOptions#cssPage()}).
+     *
+     * AIDEV-NOTE: web_print_pdf_css_page is null until the headless helper's handshake, and null answers true: before
+     * the helper started no one can know whether it is too old for the layout flags. Ask again once a view is open
+     * for the helper's own answer; a helper that is too old refuses the flags at print (UnavailableException) rather
+     * than print on the wrong paper. A report without the fact predates the flags.
+     *
+     * @return web_print_pdf true and web_print_pdf_css_page true, or null before the helper started
+     */
+    public boolean supportsPrintPdfCssPage() {
+        Map<String, Object> capabilities = this.calls.structured("capabilities", ToolCalls.args());
+        return fact(capabilities, "web_print_pdf") && capabilities.containsKey("web_print_pdf_css_page")
+                && (capabilities.get("web_print_pdf_css_page") == null || fact(capabilities, "web_print_pdf_css_page"));
+    }
+
+    /**
      * Preflight: whether this server can capture the response bodies a view's page receives.
      *
      * Worth asking before offering the feature, since a captured open is fail-closed: without the
@@ -403,7 +420,11 @@ public final class Browser {
 
     /** @return the capabilities report's boolean fact, false when missing or null */
     static boolean capability(ToolCalls calls, String fact) {
-        Object value = calls.structured("capabilities", ToolCalls.args()).get(fact);
+        return fact(calls.structured("capabilities", ToolCalls.args()), fact);
+    }
+
+    private static boolean fact(Map<String, Object> capabilities, String fact) {
+        Object value = capabilities.get(fact);
         if (value == null) return false;
         if (!(value instanceof Boolean supported)) {
             throw new ProtocolMismatchException("capabilities." + fact + " must be boolean or null");

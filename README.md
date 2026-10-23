@@ -498,6 +498,22 @@ The rules the wire contract insists on, mirrored here:
 - `supportsDownloads()` reads the `capabilities` report's `web_downloads` flag, the preflight before
   offering the feature at all.
 
+`page.printPdf` prints a view to a PDF file with its own browser (vector text, embedded fonts, the
+page's print CSS); the answer names the path, size and SHA-256. `PrintOptions.cssPage()` lets the
+document's `@page` rule decide the sheet and drops the engine's margins (a 1920x1080px slide prints
+as one 1440x810pt page). `supportsPrintPdfCssPage()` is its preflight, the report's
+`web_print_pdf_css_page`. Sketerm reports it only once the headless helper started: before that it is
+null and answers true, because nobody can know yet. Ask again with a view open for the helper's own
+answer; a helper too old for the layout refuses it at print (`UnavailableException`) rather than
+print on the wrong paper.
+
+```java
+if (sketerm.browser().supportsPrintPdfCssPage()) {
+    PdfFile pdf = page.printPdf(Path.of("/tmp/slides.pdf"), PrintOptions.cssPage());
+    System.out.println(pdf.bytes() + " bytes, sha256 " + pdf.sha256());
+}
+```
+
 ### Response-body capture
 
 A headless view can record the RESPONSES its page receives - the JSON a single-page app fetches
@@ -598,7 +614,8 @@ assert server.callsTo("web_open").size() == 1;
 typed error code, and `calls()`/`lastArguments(tool)` show what reached the server. The browser preset
 also answers `web_input` (every event repaints the view) and `web_frame` (a long poll that answers a
 `ScriptedSketerm.PIXEL_JPEG` image once the view repainted); `frameSize(w, h)` sets the frame size it
-reports against its 1280x800 viewport.
+reports against its 1280x800 viewport. Its `web_print_pdf` writes `ScriptedSketerm.PRINTED_PDF` (a
+one-page 1440x810pt document) to the path it was given.
 
 The socket fixture is opt-in and publishes the same typed stream API without an engine:
 

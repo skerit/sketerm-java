@@ -563,6 +563,48 @@ public final class Page {
         return this.downloaded(this.args());
     }
 
+    /** @see #printPdf(Path, PrintOptions) */
+    public PdfFile printPdf(Path destination) {
+        return this.printPdf(destination, null);
+    }
+
+    /**
+     * Print this view to a PDF file, rendered by its own browser: vector text, embedded fonts, the page's print CSS.
+     *
+     * @param destination an absolute file path on the machine running the server; an existing file is replaced
+     * @param options the layout, {@link PrintOptions#defaults()} when null
+     * @throws InvalidArgsException when the destination is not absolute
+     * @throws UnavailableException headless only, and a helper predating {@link PrintOptions#cssPageSize()} or
+     *         {@link PrintOptions#noMargins()} refuses them rather than print on the wrong paper
+     * @throws TimeoutException when the budget ran out; the file may still be written afterwards
+     */
+    public PdfFile printPdf(Path destination, PrintOptions options) {
+
+        PrintOptions effective = options == null ? PrintOptions.defaults() : options;
+
+        Map<String, Object> arguments = this.args();
+        arguments.put("path", absolute(destination, "path", "web_print_pdf"));
+
+        if (effective.cssPageSize()) {
+            arguments.put("css_page_size", true);
+        }
+
+        if (effective.noMargins()) {
+            arguments.put("no_margins", true);
+        }
+
+        if (!effective.background()) {
+            arguments.put("background", false);
+        }
+
+        ToolCalls.putTimeout(arguments, effective.timeout());
+
+        Map<String, Object> structured = this.calls.structured("web_print_pdf", arguments);
+        this.absorb(structured);
+
+        return PdfFile.decode(structured);
+    }
+
     /**
      * The first page of this view's captured exchanges, as metadata.
      *
