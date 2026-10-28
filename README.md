@@ -241,8 +241,10 @@ returned handle is not actually present in `web_tabs`, the SDK closes it best-ef
 
 Operation timeouts and JSON-RPC deadlines are separate on the wire. The SDK keeps the RPC request
 alive beyond the operation's `timeout_ms` so Sketerm's bounded timeout result can arrive. If the RPC
-deadline itself expires, `CallTimeoutException.outcomeUnknown()` is true: the request was sent, so a
-mutating call must not be retried blindly.
+deadline of a tool call itself expires, it throws `UnansweredCallException`, a `TimeoutException`
+whose `outcomeUnknown()` is true: the request was sent, so a mutating call must not be retried
+blindly, and the server did not answer at all, so a pool should not trust that browser again. The
+handshake (`initialize`) still throws the transport's `CallTimeoutException`.
 
 ### Vocabularies and refusals
 
@@ -255,7 +257,7 @@ token fails closed rather than being folded into a neighbour.
 Failures are typed off `structuredContent.error.code` by one switch in `SketermApiException.from`:
 `InvalidArgsException`, `NotFoundException`, `UnavailableException`, `TimeoutException`,
 `RefusedException`, `ConflictException`, `IoFailedException`, `UnknownToolException`,
-`FailedException`, plus `isRetryable()` on all of them. Three more are the api layer's own:
+`FailedException`, plus `isRetryable()` on all of them. Four more are the api layer's own:
 
 - `StaleRefException` - a `Ref` from a document the page has left, refused before the call goes out,
   and also what the server's own "stale reader id" / "unknown id" refusal decodes to.
@@ -264,6 +266,7 @@ Failures are typed off `structuredContent.error.code` by one switch in `SketermA
 - `AmbiguousMatchException` - `Snapshot.find` matched several nodes. An exact name (ignoring case) wins over names
   that merely contain the text, so `find("button", "Subscribe")` never lands on "Unsubscribe"; two nodes at the
   deciding level are refused, never guessed. `matches()` lists them; act on one by its id.
+- `UnansweredCallException` - a tool call Sketerm did not answer before its client-side deadline (above).
 
 ### Lifecycle and browsing profiles
 
@@ -447,9 +450,6 @@ connects to the proxy's address alone, and the `web_policy` attestation reads
 `http_broker:"route-proxy-only"`, which `PolicyStatus.untrusted()` checks against the view's route.
 Views opened on the same proxy url share one browser instance. Needs a Sketerm build with
 `capabilities.web_route_proxy`; an older server refuses the route text and opens nothing.
-- `withColorScheme` is headless-only and requires verified `web-emulation`. Sketerm applies it
-  before initial loading and requires a successful native media acknowledgement. The SDK checks
-  the returned colour echo, so an older server ignoring the option fails closed with
 
 #### Route exits (connections outside the browser)
 
@@ -464,6 +464,9 @@ the server's life, DNS on the host), the proxy a `tor` or `proxy:` route names, 
 `on:` has no exit (`UnavailableException`). A bridge connects in the background: an unreachable host
 refuses every CONNECT, and the next ask makes a new one (`reused()` false). `ScriptedSketerm`
 answers it after `exitingThrough(proxyUrl)`.
+- `withColorScheme` is headless-only and requires verified `web-emulation`. Sketerm applies it
+  before initial loading and requires a successful native media acknowledgement. The SDK checks
+  the returned colour echo, so an older server ignoring the option fails closed with
   `ProtocolMismatchException`. Null clears the preference; every other fluent option preserves it.
 - Restricted loading confines native Internet sockets, including WebSocket, WebRTC and
   WebTransport, uses an actual-address-validating HTTP broker, persists nothing, disables kernel

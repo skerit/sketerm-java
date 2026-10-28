@@ -16,6 +16,8 @@ import be.elevenways.sketerm.api.PointerAction;
 import be.elevenways.sketerm.api.Screenshot;
 import be.elevenways.sketerm.api.Sketerm;
 import be.elevenways.sketerm.api.SketermOptions;
+import be.elevenways.sketerm.api.TimeoutException;
+import be.elevenways.sketerm.api.UnansweredCallException;
 import be.elevenways.sketerm.api.WaitFor;
 import be.elevenways.sketerm.rpc.CallTimeoutException;
 import be.elevenways.sketerm.rpc.TransportException;
@@ -36,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -75,6 +78,26 @@ class ScriptedSketermTest {
         assertThrows(CallTimeoutException.class, () -> slow.connect(SketermOptions.builder()
             .defaultTimeout(Duration.ofSeconds(10)).startTimeout(Duration.ofMillis(200)).build()), "step 3: refused");
         assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 2000, "step 3: within its bound");
+
+        // 4. A tool call Sketerm never answers within its deadline (the operation's own plus the grace for its
+        //    timeout result) is an UnansweredCallException: a TimeoutException whose outcome is unknown.
+        try (ScriptedSketerm stalled = ScriptedSketerm.browser().answeringAfter("web_wait", Duration.ofSeconds(8));
+             Sketerm sketerm = stalled.connect(SketermOptions.builder().defaultTimeout(Duration.ofMillis(100))
+                 .build())) {
+            Page page = sketerm.browser().openPage();
+            UnansweredCallException unanswered = assertThrows(UnansweredCallException.class,
+                () -> page.waitFor(WaitFor.LOAD), "step 4: no answer in time");
+            assertInstanceOf(TimeoutException.class, unanswered, "step 4: a timeout, as the api types them");
+            assertEquals("web_wait", unanswered.getToolName(), "step 4: it names the tool");
+            assertTrue(unanswered.outcomeUnknown() && !unanswered.isRetryable(), "step 4: never retried blindly");
+            assertInstanceOf(CallTimeoutException.class, unanswered.getCause(), "step 4: the transport's cause");
+
+            // 5. A listed view is addressed without listing again, and closes.
+            Page listed = sketerm.browser().page(sketerm.browser().pages().getFirst());
+            assertEquals(page.handle(), listed.handle(), "step 5: the same view");
+            listed.close();
+            assertEquals(List.of(), stalled.openViews(), "step 5: closed");
+        }
     }
 
     @Test

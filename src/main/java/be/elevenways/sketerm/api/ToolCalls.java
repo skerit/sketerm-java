@@ -1,6 +1,7 @@
 package be.elevenways.sketerm.api;
 
 import be.elevenways.sketerm.mcp.McpSession;
+import be.elevenways.sketerm.rpc.CallTimeoutException;
 import be.elevenways.sketerm.mcp.ToolException;
 import be.elevenways.sketerm.mcp.ToolResult;
 
@@ -85,7 +86,8 @@ final class ToolCalls {
     }
 
     /**
-     * @throws SketermApiException when the tool failed
+     * @throws SketermApiException when the tool failed; an {@link UnansweredCallException} when Sketerm did not answer
+     *         before the call's client-side deadline
      */
     ToolResult call(String tool, Map<String, Object> arguments) {
 
@@ -93,6 +95,8 @@ final class ToolCalls {
             return this.session.callToolOrThrow(tool, arguments, this.rpcTimeoutMs(arguments));
         } catch (ToolException e) {
             throw SketermApiException.from(e);
+        } catch (CallTimeoutException unanswered) {
+            throw new UnansweredCallException(tool, unanswered);
         }
     }
 

@@ -178,11 +178,18 @@ public final class Browser {
 
         for (PageInfo info : this.pages()) {
             if (info.handle() == handle) {
-                return new Page(this.calls, handle, info.toFacts(), null);
+                return this.page(info);
             }
         }
 
         throw new NotFoundException("No open view has handle " + handle, "web_tabs", false, null);
+    }
+
+    /**
+     * Address a view {@link #pages()} listed, without listing them again.
+     */
+    public Page page(PageInfo info) {
+        return new Page(this.calls, info.handle(), info.toFacts(), null);
     }
 
     /**
@@ -192,7 +199,7 @@ public final class Browser {
 
         for (PageInfo info : this.pages()) {
             if (info.current()) {
-                return new Page(this.calls, info.handle(), info.toFacts(), null);
+                return this.page(info);
             }
         }
 
