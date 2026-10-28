@@ -32,6 +32,8 @@ public final class Sketerm implements AutoCloseable {
     private final ToolCalls calls;
 
     private volatile boolean closed;
+    /** Whether the server hands out route exits, read at the first need: its own tool, it stays so for its life. */
+    private volatile Boolean routeExits;
 
     private Sketerm(SketermOptions options,
                     SketermProcess process,
@@ -161,12 +163,21 @@ public final class Sketerm implements AutoCloseable {
      * @throws UnavailableException when this server has no exit for it
      */
     public RouteExit routeExit(String route) {
-        return RouteExit.ask(this.calls, route);
+        Routes.require(route);
+        return RouteExit.ask(this.calls, route, this.supportsRouteExit());
     }
 
-    /** @return whether this server hands out route exits (capabilities.web_route_exit) */
+    /**
+     * @return whether this server hands out route exits (capabilities.web_route_exit), read once per server: the tool
+     *         is the server's own, never a helper's that starts later
+     */
     public boolean supportsRouteExit() {
-        return RouteExit.supported(this.calls);
+        Boolean known = this.routeExits;
+        if (known == null) {
+            known = RouteExit.supported(this.calls);
+            this.routeExits = known;
+        }
+        return known;
     }
 
     /**

@@ -28,15 +28,16 @@ public record RouteExit(String route, String kind, String proxy, boolean reused)
     }
 
     /**
+     * Asks the server for a route already in {@link Routes#GRAMMAR}.
+     *
+     * @param supported whether the server advertises web_route_exit, as its Sketerm read it once
      * @return the exit of the route
-     * @throws InvalidArgsException when the route is outside {@link Routes#GRAMMAR}
      * @throws UnavailableException when the server has no route exits, or none for this route (on:, an
      *         unconfigured tor)
      * @throws ProtocolMismatchException when the answer is not an exit
      */
-    static RouteExit ask(ToolCalls calls, String route) {
-        Routes.require(route);
-        if (!supported(calls)) {
+    static RouteExit ask(ToolCalls calls, String route, boolean supported) {
+        if (!supported) {
             throw new UnavailableException("Sketerm does not advertise web_route_exit; no route exit for " + route,
                     TOOL, false, null);
         }
