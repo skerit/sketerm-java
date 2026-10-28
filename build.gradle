@@ -4,11 +4,9 @@ plugins {
     // layer over instead of a browser: testImplementation(testFixtures(libs.sketerm.java)).
     id 'java-test-fixtures'
     id 'maven-publish'
+    // Stamp this plugin-less library with the framework's shared provenance writer.
+    id 'be.elevenways.protoblast.build-info'
 }
-
-// Stamp this plugin-less library with the framework's shared provenance writer.
-apply from: resources.text.fromString(
-        buildscript.classLoader.getResource('be/elevenways/protoblast/gradle/build-info.gradle').text)
 
 configurations {
     loaderStub
