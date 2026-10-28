@@ -429,12 +429,20 @@ public final class Browser {
      * the one before it.
      */
     public boolean supportsConcurrentTabs() {
-        Object fact = this.calls.structured("capabilities", ToolCalls.args()).get("web_concurrent_tabs");
-        if (fact == null) return false;
-        if (!(fact instanceof Map<?, ?> concurrent)) {
-            throw new ProtocolMismatchException("capabilities.web_concurrent_tabs must be an object or null");
+        return available(this.calls, "web_concurrent_tabs");
+    }
+
+    /**
+     * @return the {@code available} member of the capabilities report's object fact, false when the fact is missing
+     * @throws ProtocolMismatchException when the fact is neither an object nor null
+     */
+    static boolean available(ToolCalls calls, String fact) {
+        Object value = calls.structured("capabilities", ToolCalls.args()).get(fact);
+        if (value == null) return false;
+        if (!(value instanceof Map<?, ?> facts)) {
+            throw new ProtocolMismatchException("capabilities." + fact + " must be an object or null");
         }
-        return Boolean.TRUE.equals(concurrent.get("available"));
+        return Boolean.TRUE.equals(facts.get("available"));
     }
 
     private boolean capability(String fact) {

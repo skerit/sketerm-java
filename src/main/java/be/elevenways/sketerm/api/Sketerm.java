@@ -155,6 +155,21 @@ public final class Sketerm implements AutoCloseable {
     }
 
     /**
+     * The proxy connections made outside the browser dial to leave through a route ({@link RouteExit}).
+     *
+     * @throws InvalidArgsException when the route is outside {@link Routes#GRAMMAR}
+     * @throws UnavailableException when this server has no exit for it
+     */
+    public RouteExit routeExit(String route) {
+        return RouteExit.ask(this.calls, route);
+    }
+
+    /** @return whether this server hands out route exits (capabilities.web_route_exit) */
+    public boolean supportsRouteExit() {
+        return RouteExit.supported(this.calls);
+    }
+
+    /**
      * The session underneath, for tools this face does not model yet.
      */
     public McpSession session() {

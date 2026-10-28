@@ -19,11 +19,13 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import java.util.function.Consumer;
@@ -68,6 +70,10 @@ public final class ScriptedSketerm implements AutoCloseable {
     private int frameHeight = 1;
     private volatile boolean streamsEnabled;
     private final List<ScriptedPageStream> streams = new CopyOnWriteArrayList<>();
+    /** The proxy every non-direct route exits through, null for none ({@link #exitingThrough}). */
+    private String exitProxy;
+    /** The routes web_route_exit already answered, so a second ask reports the exit reused. */
+    private final Set<String> exited = new HashSet<>();
 
     /** One recorded tools/call. */
     public record Call(String tool, Map<String, Object> arguments) {
@@ -134,7 +140,8 @@ public final class ScriptedSketerm implements AutoCloseable {
                 "web_max_fps", true, "web_default_max_fps", 60, "web_print_pdf", true,
                 "web_print_pdf_css_page", true, "web_network_cursor_exact", true, "web_log_url_max", 8192,
                 "web_concurrent_tabs", map("available", true, "waiting_tools",
-                        List.of("web_open", "web_navigate", "web_wait", "web_eval"), "in_flight", 0)));
+                        List.of("web_open", "web_navigate", "web_wait", "web_eval"), "in_flight", 0),
+                "web_route_exit", map("available", true, "kinds", List.of("direct", "tor", "via", "proxy"))));
         server.on("web_open", server::open);
         server.on("web_navigate", server::navigate);
         server.on("web_tabs", arguments -> server.tabs());
@@ -146,6 +153,7 @@ public final class ScriptedSketerm implements AutoCloseable {
         server.on("web_input", server::input);
         server.on("web_frame", server::frame);
         server.on("web_print_pdf", server::print);
+        server.on("web_route_exit", server::routeExit);
 
         return server;
     }
@@ -157,6 +165,15 @@ public final class ScriptedSketerm implements AutoCloseable {
     public synchronized ScriptedSketerm frameSize(int width, int height) {
         this.frameWidth = width;
         this.frameHeight = height;
+        return this;
+    }
+
+    /**
+     * Every route but direct leaves through this proxy url (web_route_exit answers it, its kind the route's own);
+     * without it only direct has an exit and every other route is refused as unavailable.
+     */
+    public synchronized ScriptedSketerm exitingThrough(String proxyUrl) {
+        this.exitProxy = Objects.requireNonNull(proxyUrl, "proxyUrl");
         return this;
     }
 
@@ -356,7 +373,8 @@ public final class ScriptedSketerm implements AutoCloseable {
                 "profile_kind", Boolean.TRUE.equals(arguments.get("ephemeral")) ? "ephemeral"
                         : profile == null ? "default" : "named",
                 "policy_active", policy != null, "policy_source", policy == null ? "none" : "call",
-                "capture_active", arguments.containsKey("capture"), "paint", 1L);
+                "capture_active", arguments.containsKey("capture"), "paint", 1L,
+                "route", arguments.getOrDefault("route", "direct"));
 
         if (policy != null) {
             view.put("policy", policy);
@@ -380,6 +398,22 @@ public final class ScriptedSketerm implements AutoCloseable {
         }
 
         return answer;
+    }
+
+    /** web_route_exit: direct needs no proxy, every other route the scripted one ({@link #exitingThrough}). */
+    private synchronized Map<String, Object> routeExit(Map<String, Object> arguments) {
+        String route = String.valueOf(arguments.get("route"));
+        String kind = route.contains(":") ? route.substring(0, route.indexOf(':')) : route;
+        if (kind.equals("on")) {
+            return errorPayload("unavailable", "on:<host> has no exit for other clients");
+        }
+        if (kind.equals("direct")) {
+            return map("route", route, "kind", kind, "proxy", null, "reused", false);
+        }
+        if (this.exitProxy == null) {
+            return errorPayload("unavailable", "no route exit was scripted (exitingThrough)");
+        }
+        return map("route", route, "kind", kind, "proxy", this.exitProxy, "reused", !this.exited.add(route));
     }
 
     /** web_navigate to a url: the view moves there and the load produced a page. */

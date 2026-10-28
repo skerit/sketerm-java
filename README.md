@@ -450,6 +450,20 @@ Views opened on the same proxy url share one browser instance. Needs a Sketerm b
 - `withColorScheme` is headless-only and requires verified `web-emulation`. Sketerm applies it
   before initial loading and requires a successful native media acknowledgement. The SDK checks
   the returned colour echo, so an older server ignoring the option fails closed with
+
+#### Route exits (connections outside the browser)
+
+```java
+RouteExit exit = sketerm.routeExit("via:me@fra-1");   // needs sketerm.supportsRouteExit()
+String proxy = exit.proxy();                          // socks5h://127.0.0.1:PORT; null for direct
+```
+
+`web_route_exit` hands a client that makes its own connections (an HTTP client beside the browser)
+the proxy a route leaves through: a `via:` host's loopback SOCKS5 bridge (kept and shared per host for
+the server's life, DNS on the host), the proxy a `tor` or `proxy:` route names, or none for `direct`.
+`on:` has no exit (`UnavailableException`). A bridge connects in the background: an unreachable host
+refuses every CONNECT, and the next ask makes a new one (`reused()` false). `ScriptedSketerm`
+answers it after `exitingThrough(proxyUrl)`.
   `ProtocolMismatchException`. Null clears the preference; every other fluent option preserves it.
 - Restricted loading confines native Internet sockets, including WebSocket, WebRTC and
   WebTransport, uses an actual-address-validating HTTP broker, persists nothing, disables kernel
