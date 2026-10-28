@@ -58,6 +58,8 @@ public final class ScriptedSketerm implements AutoCloseable {
     private final Map<String, Function<Map<String, Object>, Map<String, Object>>> tools = new LinkedHashMap<>();
     private final List<Call> calls = new CopyOnWriteArrayList<>();
     private final Map<Integer, Map<String, Object>> views = new LinkedHashMap<>();
+    /** Where an open of a url lands and with which status, by the url asked for. */
+    private final Map<String, Map.Entry<String, Integer>> landings = new LinkedHashMap<>();
     private int nextView = 1;
     private int frameWidth = 1;
     private int frameHeight = 1;
@@ -115,7 +117,7 @@ public final class ScriptedSketerm implements AutoCloseable {
     }
 
     /**
-     * A server that behaves like a capable headless Sketerm: every capability, views that open,
+     * A server that behaves like a capable headless Sketerm: every capability, views that open, navigate,
      * list, close, report and attest their policy, and screenshots of {@link #PIXEL_PNG}. Script a
      * tool again with {@link #on} to override one answer.
      */
@@ -129,6 +131,7 @@ public final class ScriptedSketerm implements AutoCloseable {
                 "web_max_fps", true, "web_default_max_fps", 60, "web_print_pdf", true,
                 "web_print_pdf_css_page", true));
         server.on("web_open", server::open);
+        server.on("web_navigate", server::navigate);
         server.on("web_tabs", arguments -> server.tabs());
         server.on("web_close", server::close);
         server.on("web_policy", server::policy);
@@ -205,18 +208,7 @@ public final class ScriptedSketerm implements AutoCloseable {
      */
     public ScriptedSketerm onError(String tool, String code, String message, boolean retryable) {
 
-        return this.on(tool, arguments -> {
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("code", code);
-            error.put("message", message);
-            error.put("retryable", retryable);
-
-            Map<String, Object> structured = new LinkedHashMap<>();
-            structured.put("error", error);
-            structured.put("__isError", true);
-
-            return structured;
-        });
+        return this.on(tool, arguments -> errorPayload(code, message, retryable));
     }
 
     /**
@@ -229,6 +221,45 @@ public final class ScriptedSketerm implements AutoCloseable {
             Map<String, Object> structured = new LinkedHashMap<>();
             structured.put("__prose", text);
             return structured;
+        });
+    }
+
+    /**
+     * Script where an open of a url lands, as a server redirect or a refusal page would: the view shows the landed
+     * url and the navigation fact names it and the status.
+     */
+    public synchronized ScriptedSketerm landing(String requested, String landed, int status) {
+        this.landings.put(requested, Map.entry(landed, status));
+        return this;
+    }
+
+    /**
+     * Script web_eval with the value the page's code evaluates to, answered as the real server answers it: inline,
+     * or, with out_file, written there (a string as itself, anything else as JSON) and named instead.
+     *
+     * @param values the value of the code the call carries (its 'code' or 'body'), from all its arguments
+     */
+    public ScriptedSketerm onEval(Function<Map<String, Object>, Object> values) {
+
+        return this.on("web_eval", arguments -> {
+            Object value = values.apply(arguments);
+            Object file = arguments.get("out_file");
+
+            if (!(file instanceof String path)) {
+                return this.viewFacts(arguments, map("value", map("value", value)));
+            }
+
+            boolean text = value instanceof String;
+            byte[] bytes = (text ? (String) value : Json.write(value)).getBytes(StandardCharsets.UTF_8);
+
+            try {
+                Files.write(Path.of(path), bytes);
+            } catch (IOException failure) {
+                return errorPayload("io_failed", "Could not write " + path + ": " + failure.getMessage());
+            }
+
+            return this.viewFacts(arguments, map("out_file", path, "bytes", bytes.length,
+                    "format", text ? "text" : "json"));
         });
     }
 
@@ -289,7 +320,9 @@ public final class ScriptedSketerm implements AutoCloseable {
     private synchronized Map<String, Object> open(Map<String, Object> arguments) {
 
         int handle = this.nextView++;
-        String url = arguments.get("url") instanceof String text ? text : "about:blank";
+        String asked = arguments.get("url") instanceof String text ? text : "about:blank";
+        Map.Entry<String, Integer> landing = this.landings.get(asked);
+        String url = landing == null ? asked : landing.getKey();
         Map<String, Object> policy = Json.optMap(arguments, "policy");
         boolean untrusted = policy != null && Boolean.TRUE.equals(policy.get("untrusted"));
         Object profile = arguments.get("profile");
@@ -315,6 +348,7 @@ public final class ScriptedSketerm implements AutoCloseable {
         answer.put("origin", url);
         answer.put("snapshot", "doc 1 rev 1 url " + url + "\n[1] document \"\" {0 children}\n");
         answer.put("settled", true);
+        answer.put("navigation", loaded(asked, url, landing == null ? 200 : landing.getValue()));
         answer.put("max_fps", arguments.getOrDefault("max_fps", 60));
 
         if (arguments.get("color_scheme") != null) {
@@ -322,6 +356,32 @@ public final class ScriptedSketerm implements AutoCloseable {
         }
 
         return answer;
+    }
+
+    /** web_navigate to a url: the view moves there and the load produced a page. */
+    private synchronized Map<String, Object> navigate(Map<String, Object> arguments) {
+
+        Map<String, Object> view = this.view(arguments);
+
+        if (view == null) {
+            return errorPayload("not_found", "No open view has handle " + arguments.get("pane"));
+        }
+
+        if (arguments.get("url") instanceof String url) {
+            view.put("url", url);
+        }
+
+        String url = (String) view.get("url");
+
+        return this.viewFacts(arguments, map("settled", true, "navigation", loaded(url, url, 200)));
+    }
+
+    /** @return the navigation fact of a load of a url that landed at another (or the same) with the status */
+    private static Map<String, Object> loaded(String requested, String url, int status) {
+        boolean http = url.startsWith("http");
+        return map("outcome", !http ? "non_http" : status >= 400 ? "http_error" : "page", "url", url,
+                "requested_url", requested, "status", http ? status : null, "redirects", List.of(),
+                "content_type", "text/html", "error", null, "detail", true);
     }
 
     /**
@@ -511,7 +571,12 @@ public final class ScriptedSketerm implements AutoCloseable {
     }
 
     private static Map<String, Object> errorPayload(String code, String message) {
-        return map("error", map("code", code, "message", message, "retryable", false), "__isError", true);
+        return errorPayload(code, message, false);
+    }
+
+    /** @return a tool's structured failure, marked so {@link #callResult} answers it as an error */
+    private static Map<String, Object> errorPayload(String code, String message, boolean retryable) {
+        return map("error", map("code", code, "message", message, "retryable", retryable), "__isError", true);
     }
 
     private String answer(Map<String, Object> request) {
@@ -586,13 +651,8 @@ public final class ScriptedSketerm implements AutoCloseable {
 
     private static Map<String, Object> errorResult(String code, String message, boolean retryable) {
 
-        Map<String, Object> error = new LinkedHashMap<>();
-        error.put("code", code);
-        error.put("message", message);
-        error.put("retryable", retryable);
-
-        Map<String, Object> structured = new LinkedHashMap<>();
-        structured.put("error", error);
+        Map<String, Object> structured = errorPayload(code, message, retryable);
+        structured.remove("__isError");
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("content", List.of(textBlock(message)));

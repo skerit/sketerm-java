@@ -48,6 +48,7 @@ public final class Page {
     private String openingSnapshotError;
     private boolean closed;
     private CloseResult closeResult;
+    private Navigation navigation;
     private Snapshot lastSnapshot;
     /** Set under the ToolCalls lock once close began: no stream is admitted after it. */
     boolean streamsClosed;
@@ -87,6 +88,14 @@ public final class Page {
      */
     public String openingSnapshotError() {
         return this.openingSnapshotError;
+    }
+
+    /**
+     * @return what the last web_open or web_navigate of this view produced: outcome, HTTP status and final url;
+     *         null when no answer carried the fact (an older server, or one that could not read its request log)
+     */
+    public Navigation navigation() {
+        return this.navigation;
     }
 
     /**
@@ -1313,6 +1322,13 @@ public final class Page {
 
         if (captureState != null) {
             this.captureActive = CaptureState.require(captureState) == CaptureState.ACTIVE;
+        }
+
+        // Only a navigating answer (web_open, web_navigate) carries what its navigation produced.
+        Navigation navigation = Navigation.decode(structured);
+
+        if (navigation != null) {
+            this.navigation = navigation;
         }
 
         Long document = Json.optLong(structured, "document");

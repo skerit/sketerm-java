@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * One web_network answer: the blocking counters plus a bounded page of the request log.
  *
- * @param nextSeq pass as 'since' on the next call to get only newer entries, 0 when absent
+ * @param nextSeq what the server names to pass as 'since' on the next call, 0 when absent
  */
 public record NetworkLog(boolean blockingEnabled,
                          int blocked,
@@ -22,9 +22,12 @@ public record NetworkLog(boolean blockingEnabled,
      * One logged request; status, size and duration only exist once it completed.
      *
      * @param type the resource type the engine classified it as, for example document or script
-     * @param reason why a blocked entry was refused - {@link DenialReason#FILTER_LIST} is the
-     *               adblock engine, every other member the enforced policy - and null when the
-     *               answer named none at all, which a server predating policies always does
+     * @param reason   why a blocked entry was refused - {@link DenialReason#FILTER_LIST} is the
+     *                 adblock engine, every other member the enforced policy - and null when the
+     *                 answer named none at all, which a server predating policies always does
+     * @param redirect whether this hop ended in a server redirect, its status being the redirect's
+     * @param prevSeq  the hop this request continues after a redirect, null for a request of its own; only a helper
+     *                 with net-log-detail links hops, and a blocked hop is linked too
      */
     public record NetworkRequest(long seq,
                                  boolean blocked,
@@ -35,7 +38,9 @@ public record NetworkLog(boolean blockingEnabled,
                                  Long durationMs,
                                  Long size,
                                  boolean pending,
-                                 DenialReason reason) {
+                                 DenialReason reason,
+                                 boolean redirect,
+                                 Long prevSeq) {
 
         /**
          * @return whether the enforced policy, rather than the ad filter, refused this request
@@ -65,7 +70,9 @@ public record NetworkLog(boolean blockingEnabled,
                         Json.optLong(entry, "duration_ms"),
                         Json.optLong(entry, "size"),
                         Json.optBool(entry, "pending", false),
-                        DenialReason.optional(Json.optStr(entry, "reason"))));
+                        DenialReason.optional(Json.optStr(entry, "reason")),
+                        Json.optBool(entry, "redirect", false),
+                        Json.optLong(entry, "prev_seq")));
             }
         }
 

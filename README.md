@@ -95,6 +95,12 @@ try (Sketerm sketerm = Sketerm.launch(options)) {
 }
 ```
 
+`page.navigation()` is what the last `web_open` or `web_navigate` of the view produced (`Navigation`: a
+`NavigationOutcome`, the main document's HTTP status, the final url and its redirect hops), so a 429 or a refused
+connection is never mistaken for a page. `waitFor(WaitFor.SELECTOR, css)` waits for an element (a selector list
+waits for the first of several), `WaitFor.NETWORK_IDLE` for a quiet network, and a `NetworkLog.NetworkRequest` links
+a redirect hop to the one it continues (`redirect`, `prevSeq`), a hop the policy refused included.
+
 `Sketerm.connect(options, transport)` completes the same handshake over a transport someone else
 opened (a scripted server in a test, a future non-stdio transport); its `process()` is then null.
 `browser().isAvailable()` reads the `capabilities` report's `web` flag: whether this server can run
@@ -237,7 +243,7 @@ mutating call must not be retried blindly.
 ### Vocabularies and refusals
 
 The tool schemas own the vocabularies; the enums mirror them one for one and carry their wire token
-(`Action`, `NavigateAction`, `WaitFor`, `ScrollTo`, `SnapshotMode`, `QueryKind`, `NetworkAction`,
+(`Action`, `NavigateAction`, `NavigationOutcome`, `WaitFor`, `ScrollTo`, `SnapshotMode`, `QueryKind`, `NetworkAction`,
 `ErrorCode`, `ProfileKind`, `ResourceType`, `UrlScheme`, `PolicySource`, `DenialReason`,
 `DownloadState`, `EvalFormat`, `CaptureState`, `CaptureTruncation`, `BodyEncoding`, `BodyPart`). An unknown
 token fails closed rather than being folded into a neighbour.
@@ -610,7 +616,9 @@ try (Sketerm sketerm = server.connect()) {
 assert server.callsTo("web_open").size() == 1;
 ```
 
-`on` replaces a tool's answer (a map, or a function of the arguments), `onError` makes it fail with a
+`on` replaces a tool's answer (a map, or a function of the arguments), `onEval` answers web_eval with the value of
+its code (inline, or written to its `out_file` as the server writes one), `landing(asked, landed, status)` makes an
+open of a url land elsewhere with a status (a redirect, a refusal page), `onError` makes it fail with a
 typed error code, and `calls()`/`lastArguments(tool)` show what reached the server. The browser preset
 also answers `web_input` (every event repaints the view) and `web_frame` (a long poll that answers a
 `ScriptedSketerm.PIXEL_JPEG` image once the view repainted); `frameSize(w, h)` sets the frame size it

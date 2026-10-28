@@ -13,6 +13,10 @@ public enum WaitFor implements WireValue {
     TEXT("text", true),
     /** The DOM stopped changing for 600ms. */
     IDLE("idle", false),
+    /** An element matches the CSS selector in the argument; an invalid selector is refused at once. */
+    SELECTOR("selector", true),
+    /** No request is in flight and none started for 500ms; a page holding a long poll never gets there. */
+    NETWORK_IDLE("network_idle", false),
     /**
      * A CAPTURED exchange finished; {@link Page#waitForResponse} is the typed way to ask, with the
      * filter and cursor this condition needs.

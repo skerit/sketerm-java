@@ -443,6 +443,63 @@ class PageApiTest {
         assertEquals(sent, server.callsTo("web_open").size(), "step 4: an unsupported server opens nothing");
     }
 
+    @Test
+    @DisplayName("A page keeps what its navigations produced, waits for a selector and links redirect hops")
+    void navigationFactsSelectorWaitsAndRedirectHops() {
+
+        FakeSketermServer server = new FakeSketermServer();
+        server.on("web_open", facts(map("view", 7, "settled", true, "snapshot", TREE, "document", 1,
+                "revision", 1, "navigation", map("outcome", "page", "url", "https://example.test/",
+                        "requested_url", "http://example.test/", "status", 200, "content_type", "text/html",
+                        "error", null, "detail", true, "redirects", List.of(map("url", "http://example.test/",
+                                "status", 301))))));
+        server.on("web_navigate", facts(map("url", "https://example.test/sorry", "settled", true,
+                "navigation", map("outcome", "http_error", "url", "https://example.test/sorry", "status", 429,
+                        "redirects", List.of(), "content_type", "text/html", "error", null, "detail", true))));
+        server.on("web_wait", facts(map("waited_for", "selector", "arg", "#results, #captcha",
+                "settled", true, "detail", "an element matches the selector")));
+        server.on("web_network", facts(map("blocking_enabled", true, "blocked", 1, "total_requests", 2,
+                "rules_loaded", 13, "next_seq", 9, "log_detail", true, "requests", List.of(
+                        map("seq", 7, "blocked", false, "type", "xhr", "method", "HEAD",
+                                "url", "https://example.test/goto?u=1", "status", 302, "redirect", true),
+                        map("seq", 8, "blocked", true, "type", "xhr", "method", "HEAD",
+                                "url", "https://elsewhere.test/a", "reason", "redirect_host", "prev_seq", 7)))));
+
+        // 1. The opening navigation is the page's: its outcome, status, final url and redirect hops
+        Page page = server.browser().openPage("http://example.test/");
+        Navigation opened = page.navigation();
+        assertEquals(NavigationOutcome.PAGE, opened.outcome(), "step 1: a page");
+        assertEquals(200, opened.status(), "step 1: its status");
+        assertEquals("https://example.test/", opened.url(), "step 1: the final url");
+        assertEquals(List.of(new Navigation.Redirect("http://example.test/", 301)), opened.redirects(),
+                "step 1: the redirect it followed");
+
+        // 2. A later navigation replaces it, an HTTP error included
+        page.navigate("https://example.test/sorry");
+        assertEquals(NavigationOutcome.HTTP_ERROR, page.navigation().outcome(), "step 2: an HTTP error");
+        assertEquals(429, page.navigation().status(), "step 2: its status");
+
+        // 3. A selector wait goes out with its selector and round-trips its condition
+        WaitResult waited = page.waitFor(WaitFor.SELECTOR, "#results, #captcha", Duration.ofSeconds(3));
+        assertEquals(WaitFor.SELECTOR, waited.waitedFor(), "step 3: the condition round-tripped");
+        assertEquals("selector", server.lastArguments("web_wait").get("for"), "step 3: its wire name");
+        assertEquals("#results, #captcha", server.lastArguments("web_wait").get("arg"), "step 3: the selector");
+        assertEquals("network_idle", WaitFor.NETWORK_IDLE.wire(), "step 3: the network idle wire name");
+
+        // 4. A redirect hop and the hop it continues are linked, the blocked one too
+        List<NetworkLog.NetworkRequest> hops = page.networkRequests();
+        assertTrue(hops.get(0).redirect(), "step 4: the first hop redirected");
+        assertNull(hops.get(0).prevSeq(), "step 4: and continues nothing");
+        assertEquals(7L, hops.get(1).prevSeq(), "step 4: the blocked target continues it");
+        assertTrue(hops.get(1).refusedByPolicy(), "step 4: refused by the policy");
+
+        // 5. An outcome this build does not name fails closed
+        server.on("web_navigate", facts(map("navigation", map("outcome", "teleported", "url", "x", "status", null,
+                "redirects", List.of(), "content_type", null, "error", null, "detail", true))));
+        assertThrows(SketermApiException.class, () -> page.navigate("https://example.test/elsewhere"),
+                "step 5: an unknown outcome is refused");
+    }
+
     private static int argInt(FakeSketermServer server, String tool, String key) {
         return ((Number) server.lastArguments(tool).get(key)).intValue();
     }
