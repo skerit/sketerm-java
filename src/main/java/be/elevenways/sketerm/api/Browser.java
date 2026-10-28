@@ -414,6 +414,29 @@ public final class Browser {
         return this.capability("web_policy_ack");
     }
 
+    /**
+     * Whether web_network's next_seq is the newest entry a reply covered, so passing it as 'since' lists exactly the
+     * entries after it, and log urls are kept whole (web_network_cursor_exact); an older server's next_seq skipped
+     * one entry per page and its log cut every url at 256 bytes.
+     */
+    public boolean supportsExactNetworkCursor() {
+        return this.capability("web_network_cursor_exact");
+    }
+
+    /**
+     * Whether the server answers web calls on different tabs side by side (web_concurrent_tabs.available), so tabs of
+     * one browser load and wait in parallel; an older server, or one driving a GUI browser, answers every call after
+     * the one before it.
+     */
+    public boolean supportsConcurrentTabs() {
+        Object fact = this.calls.structured("capabilities", ToolCalls.args()).get("web_concurrent_tabs");
+        if (fact == null) return false;
+        if (!(fact instanceof Map<?, ?> concurrent)) {
+            throw new ProtocolMismatchException("capabilities.web_concurrent_tabs must be an object or null");
+        }
+        return Boolean.TRUE.equals(concurrent.get("available"));
+    }
+
     private boolean capability(String fact) {
         return capability(this.calls, fact);
     }

@@ -99,10 +99,14 @@ try (Sketerm sketerm = Sketerm.launch(options)) {
 `NavigationOutcome`, the main document's HTTP status, the final url and its redirect hops), so a 429 or a refused
 connection is never mistaken for a page. `waitFor(WaitFor.SELECTOR, css)` waits for an element (a selector list
 waits for the first of several), `WaitFor.NETWORK_IDLE` for a quiet network, and a `NetworkLog.NetworkRequest` links
-a redirect hop to the one it continues (`redirect`, `prevSeq`), a hop the policy refused included.
+a redirect hop to the one it continues (`redirect`, `prevSeq`), a hop the policy refused included. A `BLOCKED`
+navigation names why the engine refused it (`blockedReason`: the filter list or a policy rule).
 
 `Sketerm.connect(options, transport)` completes the same handshake over a transport someone else
 opened (a scripted server in a test, a future non-stdio transport); its `process()` is then null.
+`SketermOptions.startTimeout` bounds the launch's handshake on its own (a caller with a deadline gives what is left;
+a start past it is a `CallTimeoutException`), and `sketerm.isAlive()` says whether the server still answers (not
+closed, its connection not failed, its child alive), so a pool notices a crashed browser before using it.
 `browser().isAvailable()` reads the `capabilities` report's `web` flag: whether this server can run
 the web tools at all, the preflight before opening anything. `browser().isHeadless()` says whether they
 drive the server's own headless helper rather than a GUI the user owns (the `web_gui` grant, where
@@ -619,7 +623,10 @@ assert server.callsTo("web_open").size() == 1;
 `on` replaces a tool's answer (a map, or a function of the arguments), `onEval` answers web_eval with the value of
 its code (inline, or written to its `out_file` as the server writes one), `landing(asked, landed, status)` makes an
 open of a url land elsewhere with a status (a redirect, a refusal page), `onError` makes it fail with a
-typed error code, and `calls()`/`lastArguments(tool)` show what reached the server. The browser preset
+typed error code, `answeringAfter(tool, delay)` delivers a tool's (or a method's, such as `initialize`) answers
+after the delay on another thread, so calls on several pages overlap as against a real server and a slow start can
+be scripted, `crash()` ends every session it answers, and `calls()`/`lastArguments(tool)` show what reached the
+server. The browser preset
 also answers `web_input` (every event repaints the view) and `web_frame` (a long poll that answers a
 `ScriptedSketerm.PIXEL_JPEG` image once the view repainted); `frameSize(w, h)` sets the frame size it
 reports against its 1280x800 viewport. Its `web_print_pdf` writes `ScriptedSketerm.PRINTED_PDF` (a

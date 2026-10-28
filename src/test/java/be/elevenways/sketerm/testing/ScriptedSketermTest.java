@@ -15,6 +15,10 @@ import be.elevenways.sketerm.api.PageStream;
 import be.elevenways.sketerm.api.PointerAction;
 import be.elevenways.sketerm.api.Screenshot;
 import be.elevenways.sketerm.api.Sketerm;
+import be.elevenways.sketerm.api.SketermOptions;
+import be.elevenways.sketerm.api.WaitFor;
+import be.elevenways.sketerm.rpc.CallTimeoutException;
+import be.elevenways.sketerm.rpc.TransportException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.checkerframework.checker.nullness.qual.NonNull;
@@ -41,6 +45,37 @@ import static org.junit.jupiter.api.Assertions.assertSame;
  * The published test fixture drives the whole api stack, so a consumer's test needs no browser.
  */
 class ScriptedSketermTest {
+
+    @Test
+    void delayedAnswersOverlapAStartIsBoundedAndACrashIsSeen() throws Exception {
+        // 1. Answers scripted to take a while arrive on their own: two waits on two pages overlap.
+        try (ScriptedSketerm server = ScriptedSketerm.browser().answeringAfter("web_wait", Duration.ofMillis(300));
+             Sketerm sketerm = server.connect()) {
+            Page first = sketerm.browser().openPage();
+            Page second = sketerm.browser().openPage();
+            long started = System.nanoTime();
+            CompletableFuture<?> one = CompletableFuture.runAsync(() -> first.waitFor(WaitFor.LOAD));
+            CompletableFuture<?> two = CompletableFuture.runAsync(() -> second.waitFor(WaitFor.LOAD));
+            CompletableFuture.allOf(one, two).get(5, TimeUnit.SECONDS);
+            long took = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertTrue(took < 550, "step 1: the two waits overlapped, " + took + " ms");
+
+            // 2. A live server answers; one whose stream ended is seen as gone.
+            assertTrue(sketerm.isAlive(), "step 2: alive");
+            assertTrue(sketerm.browser().supportsExactNetworkCursor() && sketerm.browser().supportsConcurrentTabs(),
+                "step 2: the preset advertises the exact cursor and concurrent tabs");
+            server.crash();
+            assertThrows(TransportException.class, () -> first.waitFor(WaitFor.LOAD), "step 2: no answer comes");
+            assertFalse(sketerm.isAlive(), "step 2: gone after a crash");
+        }
+
+        // 3. A handshake past the start timeout fails at it, not at the call timeout.
+        ScriptedSketerm slow = ScriptedSketerm.browser().answeringAfter("initialize", Duration.ofSeconds(3));
+        long started = System.nanoTime();
+        assertThrows(CallTimeoutException.class, () -> slow.connect(SketermOptions.builder()
+            .defaultTimeout(Duration.ofSeconds(10)).startTimeout(Duration.ofMillis(200)).build()), "step 3: refused");
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 2000, "step 3: within its bound");
+    }
 
     @Test
     void streamScriptAssertionIsRecordedAndClosesItsSocket() throws Exception {

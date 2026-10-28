@@ -60,6 +60,9 @@ public final class ScriptedSketerm implements AutoCloseable {
     private final Map<Integer, Map<String, Object>> views = new LinkedHashMap<>();
     /** Where an open of a url lands and with which status, by the url asked for. */
     private final Map<String, Map.Entry<String, Integer>> landings = new LinkedHashMap<>();
+    /** How long each tool's answers take to arrive, by tool name. */
+    private final Map<String, Duration> delays = new LinkedHashMap<>();
+    private final List<FakeTransport> transports = new CopyOnWriteArrayList<>();
     private int nextView = 1;
     private int frameWidth = 1;
     private int frameHeight = 1;
@@ -129,7 +132,9 @@ public final class ScriptedSketerm implements AutoCloseable {
                 "web_capture", true, "web_downloads", true, "web_untrusted", true, "web_policy_ack", true,
                 "web_input", true, "web_frames", true, "web_stream", server.streamsEnabled,
                 "web_max_fps", true, "web_default_max_fps", 60, "web_print_pdf", true,
-                "web_print_pdf_css_page", true));
+                "web_print_pdf_css_page", true, "web_network_cursor_exact", true, "web_log_url_max", 8192,
+                "web_concurrent_tabs", map("available", true, "waiting_tools",
+                        List.of("web_open", "web_navigate", "web_wait", "web_eval"), "in_flight", 0)));
         server.on("web_open", server::open);
         server.on("web_navigate", server::navigate);
         server.on("web_tabs", arguments -> server.tabs());
@@ -234,6 +239,16 @@ public final class ScriptedSketerm implements AutoCloseable {
     }
 
     /**
+     * Script a tool's answers (or a method's, such as "initialize") to arrive only after the delay, on another
+     * thread: calls on several pages then overlap as against a real server that serves them in parallel, and a slow
+     * start can be scripted.
+     */
+    public synchronized ScriptedSketerm answeringAfter(String tool, Duration delay) {
+        this.delays.put(tool, Objects.requireNonNull(delay, "delay"));
+        return this;
+    }
+
+    /**
      * Script web_eval with the value the page's code evaluates to, answered as the real server answers it: inline,
      * or, with out_file, written there (a string as itself, anything else as JSON) and named instead.
      *
@@ -300,7 +315,16 @@ public final class ScriptedSketerm implements AutoCloseable {
      * @return a fresh transport answering from this script; each transport is its own MCP session
      */
     public FakeTransport transport() {
-        return new FakeTransport(this::answer);
+        FakeTransport transport = new FakeTransport(this::answer, this::delayOf);
+        this.transports.add(transport);
+        return transport;
+    }
+
+    /** Ends every session this script answers, as a crashed server would: their connections fail. */
+    public void crash() {
+        for (FakeTransport transport : this.transports) {
+            transport.endOfStream();
+        }
     }
 
     /**
@@ -577,6 +601,12 @@ public final class ScriptedSketerm implements AutoCloseable {
     /** @return a tool's structured failure, marked so {@link #callResult} answers it as an error */
     private static Map<String, Object> errorPayload(String code, String message, boolean retryable) {
         return map("error", map("code", code, "message", message, "retryable", retryable), "__isError", true);
+    }
+
+    private synchronized Duration delayOf(Map<String, Object> request) {
+        String name = "tools/call".equals(request.get("method")) && request.get("params") instanceof Map<?, ?> params
+            ? String.valueOf(params.get("name")) : String.valueOf(request.get("method"));
+        return this.delays.getOrDefault(name, Duration.ZERO);
     }
 
     private String answer(Map<String, Object> request) {

@@ -9,13 +9,18 @@ import java.util.Map;
 /**
  * One web_network answer: the blocking counters plus a bounded page of the request log.
  *
- * @param nextSeq what the server names to pass as 'since' on the next call, 0 when absent
+ * @param nextSeq the newest seq this answer covered: pass it as 'since' to list exactly the entries after it (a
+ *                server without {@link Browser#supportsExactNetworkCursor()} answered that plus one); 0 when absent
+ * @param more    with 'since': further entries after nextSeq are already logged, so ask again
+ * @param dropped with 'since': entries after it the bounded ring overwrote before they were read
  */
 public record NetworkLog(boolean blockingEnabled,
                          int blocked,
                          int totalRequests,
                          int rulesLoaded,
                          long nextSeq,
+                         boolean more,
+                         long dropped,
                          List<NetworkRequest> requests) {
 
     /**
@@ -28,6 +33,7 @@ public record NetworkLog(boolean blockingEnabled,
      * @param redirect whether this hop ended in a server redirect, its status being the redirect's
      * @param prevSeq  the hop this request continues after a redirect, null for a request of its own; only a helper
      *                 with net-log-detail links hops, and a blocked hop is linked too
+     * @param urlTruncated whether the url is only the head of a longer one (past the server's log bound)
      */
     public record NetworkRequest(long seq,
                                  boolean blocked,
@@ -40,7 +46,8 @@ public record NetworkLog(boolean blockingEnabled,
                                  boolean pending,
                                  DenialReason reason,
                                  boolean redirect,
-                                 Long prevSeq) {
+                                 Long prevSeq,
+                                 boolean urlTruncated) {
 
         /**
          * @return whether the enforced policy, rather than the ad filter, refused this request
@@ -72,7 +79,8 @@ public record NetworkLog(boolean blockingEnabled,
                         Json.optBool(entry, "pending", false),
                         DenialReason.optional(Json.optStr(entry, "reason")),
                         Json.optBool(entry, "redirect", false),
-                        Json.optLong(entry, "prev_seq")));
+                        Json.optLong(entry, "prev_seq"),
+                        Json.optBool(entry, "url_truncated", false)));
             }
         }
 
@@ -80,12 +88,15 @@ public record NetworkLog(boolean blockingEnabled,
         Long blocked = Json.optLong(structured, "blocked");
         Long total = Json.optLong(structured, "total_requests");
         Long rules = Json.optLong(structured, "rules_loaded");
+        Long dropped = Json.optLong(structured, "dropped");
 
         return new NetworkLog(Json.optBool(structured, "blocking_enabled", false),
                 blocked == null ? 0 : blocked.intValue(),
                 total == null ? 0 : total.intValue(),
                 rules == null ? 0 : rules.intValue(),
                 nextSeq == null ? 0 : nextSeq,
+                Json.optBool(structured, "more", false),
+                dropped == null ? 0 : dropped,
                 List.copyOf(requests));
     }
 }

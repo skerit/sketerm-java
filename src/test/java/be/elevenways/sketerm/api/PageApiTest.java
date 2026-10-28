@@ -459,11 +459,12 @@ class PageApiTest {
         server.on("web_wait", facts(map("waited_for", "selector", "arg", "#results, #captcha",
                 "settled", true, "detail", "an element matches the selector")));
         server.on("web_network", facts(map("blocking_enabled", true, "blocked", 1, "total_requests", 2,
-                "rules_loaded", 13, "next_seq", 9, "log_detail", true, "requests", List.of(
+                "rules_loaded", 13, "next_seq", 8, "more", true, "dropped", 2, "log_detail", true, "requests", List.of(
                         map("seq", 7, "blocked", false, "type", "xhr", "method", "HEAD",
                                 "url", "https://example.test/goto?u=1", "status", 302, "redirect", true),
                         map("seq", 8, "blocked", true, "type", "xhr", "method", "HEAD",
-                                "url", "https://elsewhere.test/a", "reason", "redirect_host", "prev_seq", 7)))));
+                                "url", "https://elsewhere.test/a", "reason", "redirect_host", "prev_seq", 7,
+                                "url_truncated", true)))));
 
         // 1. The opening navigation is the page's: its outcome, status, final url and redirect hops
         Page page = server.browser().openPage("http://example.test/");
@@ -492,6 +493,11 @@ class PageApiTest {
         assertNull(hops.get(0).prevSeq(), "step 4: and continues nothing");
         assertEquals(7L, hops.get(1).prevSeq(), "step 4: the blocked target continues it");
         assertTrue(hops.get(1).refusedByPolicy(), "step 4: refused by the policy");
+        assertTrue(hops.get(1).urlTruncated() && !hops.get(0).urlTruncated(), "step 4: a cut url is flagged");
+        NetworkLog log = page.network(6L, 10);
+        assertEquals(8L, log.nextSeq(), "step 4: the newest seq the page covered");
+        assertTrue(log.more(), "step 4: more is logged after it");
+        assertEquals(2L, log.dropped(), "step 4: and two entries were overwritten unread");
 
         // 5. An outcome this build does not name fails closed
         server.on("web_navigate", facts(map("navigation", map("outcome", "teleported", "url", "x", "status", null,

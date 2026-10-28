@@ -32,6 +32,7 @@ public final class SketermOptions {
     private final File workingDirectory;
     private final Map<String, String> environment;
     private final Duration defaultTimeout;
+    private final Duration startTimeout;
 
     private SketermOptions(Builder builder) {
         this.binaryPath = builder.binaryPath;
@@ -42,6 +43,7 @@ public final class SketermOptions {
         // Not Map.copyOf: a null value is meaningful here, it removes an inherited variable.
         this.environment = Collections.unmodifiableMap(new LinkedHashMap<>(builder.environment));
         this.defaultTimeout = builder.defaultTimeout;
+        this.startTimeout = builder.startTimeout;
     }
 
     public static Builder builder() {
@@ -94,6 +96,13 @@ public final class SketermOptions {
     }
 
     /**
+     * @return how long the launch's handshake may take: the default timeout when none was given
+     */
+    public Duration startTimeout() {
+        return this.startTimeout != null ? this.startTimeout : this.defaultTimeout;
+    }
+
+    /**
      * @return the full argv, the executable first
      */
     public List<String> command() {
@@ -142,6 +151,7 @@ public final class SketermOptions {
         private File workingDirectory;
         private final Map<String, String> environment = new LinkedHashMap<>();
         private Duration defaultTimeout = Duration.ofSeconds(30);
+        private Duration startTimeout;
 
         private Builder() {
         }
@@ -200,6 +210,15 @@ public final class SketermOptions {
          */
         public Builder defaultTimeout(Duration defaultTimeout) {
             this.defaultTimeout = defaultTimeout;
+            return this;
+        }
+
+        /**
+         * @param startTimeout how long the handshake may take, so a caller with a deadline bounds the start by it;
+         *                     null for the default timeout
+         */
+        public Builder startTimeout(Duration startTimeout) {
+            this.startTimeout = startTimeout;
             return this;
         }
 

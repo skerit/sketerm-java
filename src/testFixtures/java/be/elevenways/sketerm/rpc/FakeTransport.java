@@ -2,6 +2,7 @@ package be.elevenways.sketerm.rpc;
 
 import be.elevenways.sketerm.json.Json;
 
+import be.elevenways.protoblast.common.thread.JobRunner;
 import be.elevenways.protoblast.common.time.Pace;
 
 import java.time.Duration;
@@ -23,6 +24,8 @@ public final class FakeTransport implements SketermTransport {
     private static final String EOF = "\0EOF";
 
     private final Function<Map<String, Object>, String> responder;
+    private final Function<Map<String, Object>, Duration> delays;
+    private final JobRunner deliveries = JobRunner.create("fake-transport");
     private final LinkedBlockingQueue<String> inbound = new LinkedBlockingQueue<>();
     private final List<String> sent = new CopyOnWriteArrayList<>();
     private final CompletableFuture<String> firstSent = new CompletableFuture<>();
@@ -31,7 +34,17 @@ public final class FakeTransport implements SketermTransport {
     private volatile boolean closed;
 
     public FakeTransport(Function<Map<String, Object>, String> responder) {
+        this(responder, request -> Duration.ZERO);
+    }
+
+    /**
+     * @param delays how long each request's answer takes to arrive; a positive delay answers on another thread, so
+     *               concurrent calls overlap as they do against a real server
+     */
+    public FakeTransport(Function<Map<String, Object>, String> responder,
+                         Function<Map<String, Object>, Duration> delays) {
         this.responder = responder;
+        this.delays = delays;
     }
 
     public List<String> getSent() {
@@ -72,10 +85,19 @@ public final class FakeTransport implements SketermTransport {
         this.sent.add(message);
         this.firstSent.complete(message);
 
-        String answer = this.responder.apply(Json.parseObject(message));
+        Map<String, Object> request = Json.parseObject(message);
+        String answer = this.responder.apply(request);
 
-        if (answer != null) {
+        if (answer == null) {
+            return;
+        }
+
+        Duration delay = this.delays.apply(request);
+
+        if (delay == null || delay.isZero() || delay.isNegative()) {
             this.inbound.add(answer);
+        } else {
+            this.deliveries.schedule(() -> this.inbound.add(answer), delay.toMillis());
         }
     }
 
@@ -100,5 +122,6 @@ public final class FakeTransport implements SketermTransport {
     public void close() {
         this.closed = true;
         this.inbound.add(EOF);
+        this.deliveries.shutdownNow();
     }
 }

@@ -9,12 +9,14 @@ import java.util.Map;
 /**
  * The navigation fact of web_open and web_navigate: what the main document's request produced.
  *
- * @param url          the final url; log urls are cut at 256 bytes by the server
+ * @param url          the final url (whole up to the server's web_log_url_max; an older server cut it at 256 bytes)
  * @param requestedUrl the url that was asked for, null when the answer named none
  * @param status       the main document's HTTP status, null when there was no HTTP answer
  * @param redirects    the server redirects before the final url, oldest first; empty from a helper without detail
  * @param contentType  the response's content type, null when unknown
  * @param error        the net::ERR_* name of a failed load, null otherwise
+ * @param blockedReason why the engine refused a {@link NavigationOutcome#BLOCKED} load (the filter list or a policy
+ *                      rule), null otherwise
  */
 public record Navigation(NavigationOutcome outcome,
                          String url,
@@ -22,7 +24,8 @@ public record Navigation(NavigationOutcome outcome,
                          Integer status,
                          List<Redirect> redirects,
                          String contentType,
-                         String error) {
+                         String error,
+                         String blockedReason) {
 
     /** One server redirect hop. */
     public record Redirect(String url, int status) {
@@ -62,6 +65,7 @@ public record Navigation(NavigationOutcome outcome,
                 status == null ? null : status.intValue(),
                 redirects,
                 Json.optStr(fact, "content_type"),
-                Json.optStr(fact, "error"));
+                Json.optStr(fact, "error"),
+                Json.optStr(fact, "blocked_reason"));
     }
 }

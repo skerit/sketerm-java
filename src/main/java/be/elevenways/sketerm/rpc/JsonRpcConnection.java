@@ -52,6 +52,11 @@ public final class JsonRpcConnection implements AutoCloseable {
         this.timeoutMs = timeoutMs;
     }
 
+    /** @return whether calls can still be sent: neither closed nor failed */
+    public boolean isOpen() {
+        return !this.closed && this.terminalFailure == null;
+    }
+
     /**
      * Send a request and block for its result member.
      *

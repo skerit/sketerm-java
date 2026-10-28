@@ -3,6 +3,7 @@ package be.elevenways.sketerm.api;
 import be.elevenways.sketerm.mcp.McpSession;
 import be.elevenways.sketerm.process.SketermProcess;
 import be.elevenways.sketerm.rpc.JsonRpcConnection;
+import be.elevenways.sketerm.rpc.CallTimeoutException;
 import be.elevenways.sketerm.rpc.SketermTransport;
 import be.elevenways.sketerm.rpc.StdioTransport;
 
@@ -79,16 +80,11 @@ public final class Sketerm implements AutoCloseable {
 
         JsonRpcConnection connection = new JsonRpcConnection(new StdioTransport(process));
 
-        Duration timeout = options.defaultTimeout();
-
-        if (timeout != null) {
-            connection.setTimeoutMs(timeout.toMillis());
-        }
-
         try {
-            return new Sketerm(options, process, connection, McpSession.initialize(connection));
+            return handshake(options, process, connection);
         } catch (RuntimeException e) {
-            boolean refused = flagMayBeUnknown && refusedAsUnknownFlag(process);
+            // A handshake that ran out of time is no unknown-flag refusal, which ends the child at once.
+            boolean refused = flagMayBeUnknown && !(e instanceof CallTimeoutException) && refusedAsUnknownFlag(process);
             connection.close();
 
             if (refused) {
@@ -120,18 +116,31 @@ public final class Sketerm implements AutoCloseable {
 
         JsonRpcConnection connection = new JsonRpcConnection(transport);
 
-        Duration timeout = options.defaultTimeout();
-
-        if (timeout != null) {
-            connection.setTimeoutMs(timeout.toMillis());
-        }
-
         try {
-            return new Sketerm(options, null, connection, McpSession.initialize(connection));
+            return handshake(options, null, connection);
         } catch (RuntimeException e) {
             connection.close();
             throw e;
         }
+    }
+
+    /**
+     * Completes the MCP handshake within {@link SketermOptions#startTimeout()}, then applies the default per-call
+     * deadline.
+     */
+    private static Sketerm handshake(SketermOptions options, SketermProcess process, JsonRpcConnection connection) {
+
+        Duration start = options.startTimeout();
+
+        if (start != null) {
+            connection.setTimeoutMs(start.toMillis());
+        }
+
+        McpSession session = McpSession.initialize(connection);
+        Duration timeout = options.defaultTimeout();
+        connection.setTimeoutMs(timeout != null ? timeout.toMillis() : JsonRpcConnection.DEFAULT_TIMEOUT_MS);
+
+        return new Sketerm(options, process, connection, session);
     }
 
     public SketermOptions options() {
@@ -175,6 +184,13 @@ public final class Sketerm implements AutoCloseable {
      */
     public String serverVersion() {
         return this.session.getServerVersion();
+    }
+
+    /**
+     * @return whether the server still answers: not closed, its connection not failed and its child (if any) alive
+     */
+    public boolean isAlive() {
+        return !this.closed && this.connection.isOpen() && (this.process == null || this.process.isAlive());
     }
 
     /**
