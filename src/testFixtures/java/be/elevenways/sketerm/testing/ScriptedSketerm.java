@@ -1,5 +1,6 @@
 package be.elevenways.sketerm.testing;
 
+import be.elevenways.protoblast.common.util.BlastCollection;
 import be.elevenways.sketerm.api.Sketerm;
 import be.elevenways.sketerm.api.SketermOptions;
 import be.elevenways.sketerm.json.Json;
@@ -83,16 +84,11 @@ public final class ScriptedSketerm implements AutoCloseable {
 
     /**
      * An ordered map of alternating keys and values.
+     *
+     * @throws IllegalArgumentException when a key has no value, is not a String or is given twice
      */
     public static Map<String, Object> map(Object... keysAndValues) {
-
-        Map<String, Object> result = new LinkedHashMap<>();
-
-        for (int i = 0; i < keysAndValues.length; i += 2) {
-            result.put((String) keysAndValues[i], keysAndValues[i + 1]);
-        }
-
-        return result;
+        return BlastCollection.orderedMap(keysAndValues);
     }
 
     /**

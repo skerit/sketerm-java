@@ -1,5 +1,6 @@
 package be.elevenways.sketerm.process;
 
+import be.elevenways.protoblast.common.util.BlastCollection;
 import be.elevenways.protoblast.server.process.CapturedOutput;
 import be.elevenways.protoblast.server.process.ProcessOutcome;
 import be.elevenways.protoblast.server.process.RunningProcess;
@@ -16,7 +17,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionException;
@@ -217,21 +217,12 @@ public final class SketermProcess implements AutoCloseable {
     }
 
     /**
-     * A convenience factory for the environment-override map.
+     * A convenience factory for the environment-override map, in argument order.
+     *
+     * @throws IllegalArgumentException when a name has no value, is null or is given twice
      */
     public static Map<String, String> environment(String... keysAndValues) {
-
-        if (keysAndValues.length % 2 != 0) {
-            throw new IllegalArgumentException("environment() needs an even number of arguments");
-        }
-
-        Map<String, String> result = new LinkedHashMap<>();
-
-        for (int i = 0; i < keysAndValues.length; i += 2) {
-            result.put(keysAndValues[i], keysAndValues[i + 1]);
-        }
-
-        return result;
+        return BlastCollection.orderedStrings(keysAndValues);
     }
 
     /**
