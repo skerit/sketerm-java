@@ -180,6 +180,29 @@ class PageApiTest {
     }
 
     @Test
+    @DisplayName("An open that skips its first snapshot asks the server for none and keeps the navigation")
+    void openSkippingItsOpeningSnapshot() {
+
+        FakeSketermServer server = new FakeSketermServer();
+        server.on("web_open", facts(map("view", 4, "settled", false, "snapshot_error", "skipped by request",
+                "navigation", map("outcome", "download", "url", "https://example.test/data",
+                        "requested_url", "https://example.test/data", "status", 200,
+                        "content_type", "application/json", "redirects", List.of()))));
+        server.on("web_tabs", map("backend", "headless", "count", 1, "helper", "ready",
+                "views", List.of(map("view", 4, "url", "https://example.test/data",
+                        "title", "", "loading", false, "current", true))));
+
+        OpenOptions options = OpenOptions.defaults().withoutOpeningSnapshot().withTimeout(Duration.ofSeconds(5));
+        assertFalse(options.openingSnapshot(), "step 1: the choice survives later options");
+        assertTrue(OpenOptions.defaults().openingSnapshot(), "step 1: an open keeps its snapshot by default");
+        Page page = server.browser().openPage("https://example.test/data", options);
+
+        assertEquals("none", server.lastArguments("web_open").get("snapshot"), "step 2: none is asked for");
+        assertNull(page.lastSnapshot(), "step 2: no opening tree");
+        assertEquals(NavigationOutcome.DOWNLOAD, page.navigation().outcome(), "step 2: the navigation is kept");
+    }
+
+    @Test
     @DisplayName("An open that never produced a real view is refused instead of leaking a phantom page")
     void openWithoutAView() {
 

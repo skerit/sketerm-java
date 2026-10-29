@@ -78,6 +78,10 @@ public final class Browser {
                 arguments.put("ephemeral", true);
             }
 
+            if (!options.openingSnapshot()) {
+                arguments.put("snapshot", "none");
+            }
+
             if (options.policy() != null) {
                 arguments.put("policy", options.policy().toWire());
             }

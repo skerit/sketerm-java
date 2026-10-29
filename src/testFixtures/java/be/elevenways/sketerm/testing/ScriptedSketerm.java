@@ -22,6 +22,7 @@ import java.util.Base64;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -62,6 +63,7 @@ public final class ScriptedSketerm implements AutoCloseable {
     private final Map<Integer, Map<String, Object>> views = new LinkedHashMap<>();
     /** Where an open of a url lands and with which status, by the url asked for. */
     private final Map<String, Map.Entry<String, Integer>> landings = new LinkedHashMap<>();
+    private final Set<String> downloads = new LinkedHashSet<>();
     /** How long each tool's answers take to arrive, by tool name. */
     private final Map<String, Duration> delays = new LinkedHashMap<>();
     private final List<FakeTransport> transports = new CopyOnWriteArrayList<>();
@@ -256,6 +258,15 @@ public final class ScriptedSketerm implements AutoCloseable {
     }
 
     /**
+     * Script that an open of a url saves its answer as a download (a data address served as an attachment): the
+     * navigation fact says download, with status 200 and a JSON content type.
+     */
+    public synchronized ScriptedSketerm downloading(String requested) {
+        this.downloads.add(requested);
+        return this;
+    }
+
+    /**
      * Script a tool's answers (or a method's, such as "initialize") to arrive only after the delay, on another
      * thread: calls on several pages then overlap as against a real server that serves them in parallel, and a slow
      * start can be scripted.
@@ -388,9 +399,16 @@ public final class ScriptedSketerm implements AutoCloseable {
 
         Map<String, Object> answer = facts(view);
         answer.put("origin", url);
-        answer.put("snapshot", "doc 1 rev 1 url " + url + "\n[1] document \"\" {0 children}\n");
+        if (!"none".equals(arguments.get("snapshot"))) {
+            answer.put("snapshot", "doc 1 rev 1 url " + url + "\n[1] document \"\" {0 children}\n");
+        }
         answer.put("settled", true);
-        answer.put("navigation", loaded(asked, url, landing == null ? 200 : landing.getValue()));
+        Map<String, Object> navigation = loaded(asked, url, landing == null ? 200 : landing.getValue());
+        if (this.downloads.contains(asked)) {
+            navigation.put("outcome", "download");
+            navigation.put("content_type", "application/json");
+        }
+        answer.put("navigation", navigation);
         answer.put("max_fps", arguments.getOrDefault("max_fps", 60));
 
         if (arguments.get("color_scheme") != null) {

@@ -45,7 +45,7 @@ class CaptureApiTest {
     private static final List<String> SCHEMA_PARTS = List.of("response", "request");
 
     private static final List<String> SCHEMA_WAIT_FOR = List.of("load", "title", "text", "idle",
-            "response");
+            "selector", "network_idle", "response");
 
     @Test
     @DisplayName("Every capture vocabulary matches the tool schema's enum, member for member")
