@@ -585,18 +585,6 @@ class PageApiIT {
         void stop() {
             this.http.stop(0);
         }
-
-        private static void respond(HttpExchange exchange, String type, String body) throws IOException {
-
-            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-
-            exchange.getResponseHeaders().add("Content-Type", type + "; charset=utf-8");
-            exchange.sendResponseHeaders(200, bytes.length);
-
-            try (var stream = exchange.getResponseBody()) {
-                stream.write(bytes);
-            }
-        }
     }
 
     /**
@@ -647,17 +635,17 @@ class PageApiIT {
         void stop() {
             this.http.stop(0);
         }
+    }
 
-        private static void respond(HttpExchange exchange, String type, String body) throws IOException {
+    private static void respond(HttpExchange exchange, String type, String body) throws IOException {
 
-            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
 
-            exchange.getResponseHeaders().add("Content-Type", type + "; charset=utf-8");
-            exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseHeaders().add("Content-Type", type + "; charset=utf-8");
+        exchange.sendResponseHeaders(200, bytes.length);
 
-            try (var stream = exchange.getResponseBody()) {
-                stream.write(bytes);
-            }
+        try (var stream = exchange.getResponseBody()) {
+            stream.write(bytes);
         }
     }
 
