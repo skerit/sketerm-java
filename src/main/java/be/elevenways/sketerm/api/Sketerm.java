@@ -29,6 +29,7 @@ public final class Sketerm implements AutoCloseable {
     private final JsonRpcConnection connection;
     private final McpSession session;
     private final Browser browser;
+    private final Agents agents;
     private final ToolCalls calls;
 
     private volatile boolean closed;
@@ -45,6 +46,7 @@ public final class Sketerm implements AutoCloseable {
         this.session = session;
         this.calls = new ToolCalls(session, options.defaultTimeout());
         this.browser = new Browser(this.calls);
+        this.agents = new Agents(this.calls);
     }
 
     /**
@@ -154,6 +156,14 @@ public final class Sketerm implements AutoCloseable {
      */
     public Browser browser() {
         return this.browser;
+    }
+
+    /**
+     * The sub-agent face; every agent_* call it models goes through it. The server must publish the agent tool group
+     * ({@link SketermOptions.Builder#toolGroups}).
+     */
+    public Agents agents() {
+        return this.agents;
     }
 
     /**
