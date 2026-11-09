@@ -1,14 +1,13 @@
 package be.elevenways.sketerm.api;
 
 import be.elevenways.protoblast.common.time.Now;
+import be.elevenways.protoblast.diagnostic.DigestAlgorithm;
 import be.elevenways.sketerm.json.Json;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -248,24 +247,7 @@ public record Evidence(String finalUrl,
      * @return lower-case hex of the SHA-256 of these bytes
      */
     public static String sha256(byte[] bytes) {
-
-        MessageDigest digest;
-
-        try {
-            digest = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            // Every JDK ships SHA-256; there is no sane fallback and no reason to have one.
-            throw new IllegalStateException("This JVM has no SHA-256", e);
-        }
-
-        StringBuilder hex = new StringBuilder(64);
-
-        for (byte value : digest.digest(bytes)) {
-            hex.append(Character.forDigit((value >> 4) & 0xF, 16));
-            hex.append(Character.forDigit(value & 0xF, 16));
-        }
-
-        return hex.toString();
+        return DigestAlgorithm.SHA_256.hex(bytes);
     }
 
     private static void put(Map<String, Object> target, String key, Object value) {
