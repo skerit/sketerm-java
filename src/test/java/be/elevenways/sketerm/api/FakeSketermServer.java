@@ -11,7 +11,7 @@ import java.util.function.Function;
 
 /**
  * The api tests' handle on a {@link ScriptedSketerm}: the published script plus the package-private
- * stack ({@link ToolCalls}, {@link Browser}) these tests drive directly.
+ * stack ({@link ToolCalls}, {@link Browser}, {@link Agents}) these tests drive directly.
  */
 final class FakeSketermServer {
 
@@ -70,6 +70,13 @@ final class FakeSketermServer {
      */
     Browser browser() {
         return new Browser(this.toolCalls());
+    }
+
+    /**
+     * The sub-agent face over this fake.
+     */
+    Agents agents() {
+        return new Agents(this.toolCalls());
     }
 
     ToolCalls toolCalls() {
