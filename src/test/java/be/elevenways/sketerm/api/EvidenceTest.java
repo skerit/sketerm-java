@@ -1,5 +1,6 @@
 package be.elevenways.sketerm.api;
 
+import be.elevenways.protoblast.diagnostic.DigestAlgorithm;
 import be.elevenways.sketerm.json.Json;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -63,7 +64,7 @@ class EvidenceTest {
         assertEquals((byte) 0x89, evidence.screenshot().bytes()[0], "step 2: and real PNG bytes");
 
         // 3. The screenshot is fingerprinted with the JDK's own SHA-256
-        assertEquals(Evidence.sha256(Base64.getDecoder().decode(PNG_BASE64)),
+        assertEquals(DigestAlgorithm.SHA_256.hex(Base64.getDecoder().decode(PNG_BASE64)),
                 evidence.screenshotSha256(), "step 3: the digest is of exactly those bytes");
         assertEquals(64, evidence.screenshotSha256().length(), "step 3: as 64 hex characters");
 

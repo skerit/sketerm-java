@@ -1,7 +1,7 @@
 package be.elevenways.sketerm.api;
 
-import be.elevenways.protoblast.common.time.Now;
 import be.elevenways.protoblast.diagnostic.DigestAlgorithm;
+import be.elevenways.protoblast.common.time.Now;
 import be.elevenways.sketerm.json.Json;
 
 import java.io.IOException;
@@ -120,7 +120,7 @@ public record Evidence(String finalUrl,
                 markdown,
                 network,
                 policy,
-                screenshot == null ? null : sha256(screenshot.bytes()));
+                screenshot == null ? null : DigestAlgorithm.SHA_256.hex(screenshot.bytes()));
     }
 
     /**
@@ -241,13 +241,6 @@ public record Evidence(String finalUrl,
         }
 
         return manifest;
-    }
-
-    /**
-     * @return lower-case hex of the SHA-256 of these bytes
-     */
-    public static String sha256(byte[] bytes) {
-        return DigestAlgorithm.SHA_256.hex(bytes);
     }
 
     private static void put(Map<String, Object> target, String key, Object value) {
