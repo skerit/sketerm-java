@@ -13,7 +13,7 @@ Each layer knows only the one below it, so a future HTTP transport is a swap and
 | Package | Responsibility |
 | --- | --- |
 | `json` | `Json`, a facade over one shared `Dry`: `parseObject`, an NDJSON-safe `write`, and typed getters that fail with the offending key named |
-| `process` | `SketermProcess`: argv/cwd/env, UTF-8 line streams and a 200-line stderr tail, supervised by protoblast's `Subprocess`. `close()` sends end-of-file (Sketerm then stops its own helpers and flushes profile cookies), waits up to the close timeout, and only then stops the WHOLE process tree (SIGTERM, SIGKILL after `STOP_GRACE`); a crashed JVM never orphans a browser |
+| `process` | `SketermProcess`: argv/cwd/env, UTF-8 line streams and a 200-line stderr tail, supervised by protoblast's `Subprocess`. `close()` sends end-of-file (Sketerm then stops its own helpers and flushes profile cookies), waits up to the close timeout, and only then stops the WHOLE process tree (SIGTERM, SIGKILL after `STOP_GRACE`); a JVM that exits stops every live tree from its shutdown hook, and a JVM killed outright (SIGKILL) leaves the child only end-of-file on its stdin, which a healthy `sketerm mcp` answers by stopping its helpers |
 | `rpc` | `SketermTransport` (the seam), `StdioTransport` (newline framing), `JsonRpcConnection` (id correlation, per-call timeouts, EOF drains every pending call with the child's exit code and stderr tail) |
 | `mcp` | `McpSession` (initialize, tools/list, tools/call, ping), `ToolDescriptor`, `ToolResult`, `Content`, `ToolException` |
 | `api` | The Playwright-SHAPED synchronous face over the browser tool group: `Sketerm`, `Browser`, `Page`, `Snapshot`/`Ref`, `NetworkPolicy`/`PolicyStatus`, `Evidence`, and one typed exception per error code |

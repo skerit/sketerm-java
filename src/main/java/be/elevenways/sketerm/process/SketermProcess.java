@@ -26,7 +26,9 @@ import java.util.concurrent.TimeoutException;
  * A supervised Sketerm child process: UTF-8 line streams plus a stderr tail kept for diagnostics.
  *
  * The child runs through protoblast's {@link Subprocess}, so a forced stop reaches its whole
- * process tree and a crashed JVM never orphans a browser.
+ * process tree, and a JVM that exits stops every live tree from its shutdown hook. A JVM killed
+ * outright (SIGKILL) runs no hook: then the child only sees end-of-file on its stdin pipe, which
+ * a healthy {@code sketerm mcp} answers by shutting its helpers down; nothing stops one that does not.
  *
  * AIDEV-NOTE: closing sends end-of-file first, which `sketerm mcp` answers by shutting its
  * browser helpers down itself (measured: gone in about 0.2s with every child reaped). Only a child
