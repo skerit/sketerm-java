@@ -24,6 +24,8 @@ import java.time.Duration;
  * @param maxFps headless CEF paint cap from 1 to 240; null keeps the server's default
  * @param openingSnapshot whether the open answers with the page's first semantic tree; skipping it also skips the
  *                        server's wait for that tree, which a download (no document) holds until the timeout
+ * @param hideScrollbars headless pages paint no scrollbar and lay out over the full viewport width, set by the
+ *                       engine before the first document; a server without web_hide_scrollbars opens nothing
  */
 public record OpenOptions(Integer width,
                           Integer height,
@@ -35,9 +37,18 @@ public record OpenOptions(Integer width,
                           String route,
                           ColorScheme colorScheme,
                           Integer maxFps,
-                          boolean openingSnapshot) {
+                          boolean openingSnapshot,
+                          boolean hideScrollbars) {
 
     public static final int MAX_FPS = 240;
+
+    /** Existing callers keep the engine's scrollbars. */
+    public OpenOptions(Integer width, Integer height, Duration timeout, String profile, boolean ephemeral,
+                       NetworkPolicy policy, CaptureFilter capture, String route, ColorScheme colorScheme,
+                       Integer maxFps, boolean openingSnapshot) {
+        this(width, height, timeout, profile, ephemeral, policy, capture, route, colorScheme, maxFps, openingSnapshot,
+                false);
+    }
 
     /** Existing callers keep the opening snapshot. */
     public OpenOptions(Integer width, Integer height, Duration timeout, String profile, boolean ephemeral,
@@ -148,12 +159,12 @@ public record OpenOptions(Integer width,
 
     public OpenOptions withViewport(int width, int height) {
         return new OpenOptions(width, height, this.timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot);
+                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     public OpenOptions withTimeout(Duration timeout) {
         return new OpenOptions(this.width, this.height, timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot);
+                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     /**
@@ -161,7 +172,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withPolicy(NetworkPolicy policy) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, policy,
-                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot);
+                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     /**
@@ -169,7 +180,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions capturing(CaptureFilter capture) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
-                capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot);
+                capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     /**
@@ -178,7 +189,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withProfile(String profile) {
         return new OpenOptions(this.width, this.height, this.timeout, profile, this.ephemeral, this.policy,
-                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot);
+                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     /**
@@ -186,7 +197,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withEphemeral() {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, true, this.policy,
-                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot);
+                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     /**
@@ -194,7 +205,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withDefaultIdentity() {
         return new OpenOptions(this.width, this.height, this.timeout, null, false, this.policy,
-                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot);
+                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     /**
@@ -206,7 +217,7 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withRoute(String route) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, route, this.colorScheme, this.maxFps, this.openingSnapshot);
+                this.capture, route, this.colorScheme, this.maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     /**
@@ -215,19 +226,28 @@ public record OpenOptions(Integer width,
      */
     public OpenOptions withColorScheme(ColorScheme colorScheme) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, this.route, colorScheme, this.maxFps, this.openingSnapshot);
+                this.capture, this.route, colorScheme, this.maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     /** Null preserves the server's headless default; explicit caps require capability support. */
     public OpenOptions withMaxFps(Integer maxFps) {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, this.route, this.colorScheme, maxFps, this.openingSnapshot);
+                this.capture, this.route, this.colorScheme, maxFps, this.openingSnapshot, this.hideScrollbars);
     }
 
     /** Opens without the first semantic tree ({@code snapshot: "none"}); {@link Page#lastSnapshot()} is then null. */
     public OpenOptions withoutOpeningSnapshot() {
         return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
-                this.capture, this.route, this.colorScheme, this.maxFps, false);
+                this.capture, this.route, this.colorScheme, this.maxFps, false, this.hideScrollbars);
+    }
+
+    /**
+     * Headless pages without painted scrollbars ({@code hide_scrollbars}), so a shot shows the full layout width.
+     * Fail closed: a server or helper without the capability opens nothing.
+     */
+    public OpenOptions withHiddenScrollbars() {
+        return new OpenOptions(this.width, this.height, this.timeout, this.profile, this.ephemeral, this.policy,
+                this.capture, this.route, this.colorScheme, this.maxFps, this.openingSnapshot, true);
     }
 
     static void requireMaxFps(Integer maxFps, String tool) {

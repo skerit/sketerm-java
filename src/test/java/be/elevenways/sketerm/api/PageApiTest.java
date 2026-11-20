@@ -467,6 +467,34 @@ class PageApiTest {
     }
 
     @Test
+    @DisplayName("Hidden scrollbars reach web_open, must be acknowledged, and open nothing on an engine without them")
+    void hiddenScrollbarsReachTheEngineAndFailClosed() {
+        FakeSketermServer server = new FakeSketermServer();
+        server.on("capabilities", map("web_hide_scrollbars", true));
+        server.on("web_close", arguments -> map("backend", "headless", "closed", arguments.get("pane"),
+                "remaining", 0, "current", 0));
+        OpenOptions options = OpenOptions.viewport(640, 360).withHiddenScrollbars().withTimeout(Duration.ofSeconds(5));
+        assertTrue(options.withViewport(800, 600).withoutOpeningSnapshot().withMaxFps(15).hideScrollbars(),
+                "step 1: fluent options keep the choice");
+        assertFalse(OpenOptions.viewport(640, 360).hideScrollbars(), "step 1: scrollbars stay by default");
+        server.on("web_open", facts(map("view", 7, "settled", true, "snapshot", TREE,
+                "document", 1, "revision", 1, "hide_scrollbars", true)));
+        Browser browser = server.browser();
+        browser.openPage("https://example.test/", options).close();
+        assertEquals(Boolean.TRUE, server.lastArguments("web_open").get("hide_scrollbars"), "step 2: it reaches MCP");
+        browser.openPage("https://example.test/", OpenOptions.viewport(640, 360)).close();
+        assertNull(server.lastArguments("web_open").get("hide_scrollbars"), "step 2: a plain open never asks");
+        server.on("web_open", facts(map("view", 8, "settled", true, "snapshot", TREE, "document", 1, "revision", 1)));
+        assertThrows(ProtocolMismatchException.class, () -> browser.openPage("https://example.test/", options),
+                "step 3: an ignored option fails closed and closes the returned handle");
+        assertEquals(8, argInt(server, "web_close", "pane"));
+        server.on("capabilities", map("web_hide_scrollbars", false));
+        int sent = server.callsTo("web_open").size();
+        assertThrows(UnavailableException.class, () -> browser.openPage("https://example.test/", options));
+        assertEquals(sent, server.callsTo("web_open").size(), "step 4: an engine without it opens nothing");
+    }
+
+    @Test
     @DisplayName("A page keeps what its navigations produced, waits for a selector and links redirect hops")
     void navigationFactsSelectorWaitsAndRedirectHops() {
 

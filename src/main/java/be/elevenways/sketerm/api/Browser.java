@@ -51,6 +51,10 @@ public final class Browser {
             throw new UnavailableException("Sketerm does not advertise web_max_fps; nothing was opened",
                     "web_open", false, null);
         }
+        if (options != null && options.hideScrollbars() && !this.supportsHiddenScrollbars()) {
+            throw new UnavailableException("Sketerm does not advertise web_hide_scrollbars; nothing was opened",
+                    "web_open", false, null);
+        }
 
         boolean untrusted = options != null && options.policy() != null && options.policy().requiresUntrusted();
         if (untrusted && !this.supportsUntrusted()) {
@@ -68,6 +72,7 @@ public final class Browser {
             ToolCalls.put(arguments, "color_scheme", options.colorScheme() == null ? null
                     : options.colorScheme().wire());
             ToolCalls.put(arguments, "max_fps", options.maxFps());
+            if (options.hideScrollbars()) arguments.put("hide_scrollbars", true);
             if (untrusted && options.route() == null) arguments.put("route", "direct");
 
             if (options.profile() != null) {
@@ -103,6 +108,9 @@ public final class Browser {
                     && !options.colorScheme().wire().equals(Json.optStr(structured, "color_scheme"))) {
                 throw new ProtocolMismatchException("web_open did not acknowledge color_scheme: "
                         + options.colorScheme().wire());
+            }
+            if (options != null && options.hideScrollbars() && !Boolean.TRUE.equals(structured.get("hide_scrollbars"))) {
+                throw new ProtocolMismatchException("web_open did not acknowledge hide_scrollbars");
             }
             // A view opened on another route than asked is browsing somewhere the caller did
             // not choose; a proxy route must be confirmed outright.
@@ -410,6 +418,11 @@ public final class Browser {
     /** Missing or false web_max_fps means explicit headless caps are unsupported. */
     public boolean supportsMaxFps() {
         return this.capability("web_max_fps");
+    }
+
+    /** Whether headless opens can hide the page scrollbars (web_hide_scrollbars); missing means unsupported. */
+    public boolean supportsHiddenScrollbars() {
+        return this.capability("web_hide_scrollbars");
     }
 
     /** Build/platform support for Linux headless untrusted loading; absent means unsupported. */

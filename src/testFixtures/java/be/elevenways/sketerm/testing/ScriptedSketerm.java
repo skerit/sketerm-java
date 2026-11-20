@@ -72,6 +72,8 @@ public final class ScriptedSketerm implements AutoCloseable {
     private int frameWidth = 1;
     private int frameHeight = 1;
     private volatile boolean streamsEnabled;
+    /** Whether the engine announces and honours web_open hide_scrollbars ({@link #withoutHiddenScrollbars}). */
+    private volatile boolean hideScrollbars = true;
     private final List<ScriptedPageStream> streams = new CopyOnWriteArrayList<>();
     /** The proxy every non-direct route exits through, null for none ({@link #exitingThrough}). */
     private String exitProxy;
@@ -135,7 +137,8 @@ public final class ScriptedSketerm implements AutoCloseable {
         server.on("capabilities", arguments -> map("web", true, "web_backend", "headless", "web_profiles", true,
                 "web_capture", true, "web_downloads", true, "web_untrusted", true, "web_policy_ack", true,
                 "web_input", true, "web_frames", true, "web_stream", server.streamsEnabled,
-                "web_max_fps", true, "web_default_max_fps", 60, "web_print_pdf", true,
+                "web_max_fps", true, "web_hide_scrollbars", server.hideScrollbars, "web_default_max_fps", 60,
+                "web_print_pdf", true,
                 "web_print_pdf_css_page", true, "web_network_cursor_exact", true, "web_log_url_max", 8192,
                 "web_concurrent_tabs", map("available", true, "waiting_tools",
                         List.of("web_open", "web_navigate", "web_wait", "web_eval"), "in_flight", 0),
@@ -163,6 +166,15 @@ public final class ScriptedSketerm implements AutoCloseable {
     public synchronized ScriptedSketerm frameSize(int width, int height) {
         this.frameWidth = width;
         this.frameHeight = height;
+        return this;
+    }
+
+    /**
+     * An engine predating hide-scrollbars: capabilities report web_hide_scrollbars false and web_open ignores
+     * the argument, as every Sketerm before it does.
+     */
+    public ScriptedSketerm withoutHiddenScrollbars() {
+        this.hideScrollbars = false;
         return this;
     }
 
@@ -409,6 +421,9 @@ public final class ScriptedSketerm implements AutoCloseable {
 
         if (arguments.get("color_scheme") != null) {
             answer.put("color_scheme", arguments.get("color_scheme"));
+        }
+        if (this.hideScrollbars && Boolean.TRUE.equals(arguments.get("hide_scrollbars"))) {
+            answer.put("hide_scrollbars", true);
         }
 
         return answer;
